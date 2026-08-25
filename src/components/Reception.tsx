@@ -26,7 +26,12 @@ import {
   AlertTriangle,
   HardDrive,
   Check,
-  Radio
+  Radio,
+  Database,
+  Download,
+  ShieldCheck,
+  Activity,
+  Layers
 } from 'lucide-react';
 import type { Producer, Batch } from '../types';
 import { ThermalTicket, type TicketData } from './ThermalTicket';
@@ -35,12 +40,23 @@ import { calculateReceptionTotals } from '../utils/receptionCalculations';
 import { saveCloudBatch } from '../lib/cloudService';
 import {
   getOfflineBatches,
+  getOfflineBatchesAsync,
   saveOfflineBatch,
   offlineBatchToBatch,
   syncAllOfflineBatches,
   removeOfflineBatch,
   type OfflineBatchPayload
 } from '../utils/offlineReceptionStorage';
+import {
+  cacheProducersInIndexedDB,
+  getCachedProducersFromIndexedDB,
+  cacheServerBatchesInIndexedDB,
+  getHistoricalBatchesFromIndexedDB,
+  getOfflineStorageMetrics,
+  getAuditLogsFromIndexedDB,
+  exportDatabaseBackupJSON,
+  type OfflineAuditLog
+} from '../utils/indexedDbManager';
 
 export function Reception() {
   const [producers, setProducers] = React.useState<Producer[]>([]);
@@ -55,6 +71,18 @@ export function Reception() {
   const [offlineBatches, setOfflineBatches] = React.useState<OfflineBatchPayload[]>([]);
   const [isSyncing, setIsSyncing] = React.useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = React.useState<{ type: 'success' | 'warning' | 'info'; message: string } | null>(null);
+
+  // IndexedDB Diagnostics & Backup Modal State
+  const [showStorageModal, setShowStorageModal] = React.useState(false);
+  const [storageMetrics, setStorageMetrics] = React.useState<{
+    pendingCount: number;
+    historyCount: number;
+    producersCount: number;
+    auditCount: number;
+    dbType: string;
+    isReady: boolean;
+  } | null>(null);
+  const [auditLogs, setAuditLogs] = React.useState<OfflineAuditLog[]>([]);
 
   // New Batch Modal State
   const [showForm, setShowForm] = React.useState(false);
@@ -90,28 +118,95 @@ export function Reception() {
     default_orchard: ''
   });
 
-  // Load Data
-  const fetchData = React.useCallback(() => {
-    setLoading(true);
-    Promise.all([
-      fetch('/api/producers').then(res => res.ok ? res.json() : []),
-      fetch('/api/batches').then(res => res.ok ? res.json() : [])
-    ])
-      .then(([prods, bat]) => {
-        setProducers(Array.isArray(prods) ? prods : []);
-        setBatches(Array.isArray(bat) ? bat : []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Error fetching data:', err);
-        setLoading(false);
-      });
+  // Refresh Storage Metrics
+  const refreshMetrics = React.useCallback(async () => {
+    try {
+      const metrics = await getOfflineStorageMetrics();
+      setStorageMetrics(metrics);
+      const logs = await getAuditLogsFromIndexedDB(30);
+      setAuditLogs(logs);
+    } catch (e) {
+      console.warn('Error refreshing storage metrics:', e);
+    }
   }, []);
 
-  const refreshOfflineQueue = React.useCallback(() => {
-    const queue = getOfflineBatches();
+  // Load Data with IndexedDB Offline Fallback
+  const fetchData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [prodsRes, batRes] = await Promise.allSettled([
+        fetch('/api/producers').then(res => res.ok ? res.json() : []),
+        fetch('/api/batches').then(res => res.ok ? res.json() : [])
+      ]);
+
+      let loadedProducers: Producer[] = [];
+      let loadedBatches: Batch[] = [];
+
+      if (prodsRes.status === 'fulfilled' && Array.isArray(prodsRes.value) && prodsRes.value.length > 0) {
+        loadedProducers = prodsRes.value;
+        // Guardar catálogo en IndexedDB para disponibilidad offline
+        cacheProducersInIndexedDB(loadedProducers);
+      } else {
+        // Fallback desde caché IndexedDB
+        loadedProducers = await getCachedProducersFromIndexedDB();
+      }
+
+      if (batRes.status === 'fulfilled' && Array.isArray(batRes.value) && batRes.value.length > 0) {
+        loadedBatches = batRes.value;
+        // Cachear histórico en IndexedDB
+        cacheServerBatchesInIndexedDB(loadedBatches);
+      } else {
+        // Fallback desde histórico IndexedDB
+        const localHist = await getHistoricalBatchesFromIndexedDB();
+        if (localHist.length > 0) {
+          loadedBatches = localHist.map(offlineBatchToBatch);
+        }
+      }
+
+      setProducers(loadedProducers);
+      setBatches(loadedBatches);
+      setLoading(false);
+      refreshMetrics();
+    } catch (err) {
+      console.error('Error fetching data, attempting IndexedDB offline recovery:', err);
+      const offlineProds = await getCachedProducersFromIndexedDB();
+      const localHist = await getHistoricalBatchesFromIndexedDB();
+      setProducers(offlineProds);
+      setBatches(localHist.map(offlineBatchToBatch));
+      setLoading(false);
+      refreshMetrics();
+    }
+  }, [refreshMetrics]);
+
+  const refreshOfflineQueue = React.useCallback(async () => {
+    const queue = await getOfflineBatchesAsync();
     setOfflineBatches(queue);
-  }, []);
+    refreshMetrics();
+  }, [refreshMetrics]);
+
+  // Export JSON Backup
+  const handleExportBackup = async () => {
+    try {
+      const jsonStr = await exportDatabaseBackupJSON();
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `JBM_BASCULA_RESPALDO_OFFLINE_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setSyncFeedback({
+        type: 'success',
+        message: '💾 Respaldo JSON de báscula exportado con éxito a su dispositivo.'
+      });
+      setTimeout(() => setSyncFeedback(null), 5000);
+      refreshMetrics();
+    } catch (err: any) {
+      alert('Error exportando respaldo: ' + err.message);
+    }
+  };
 
   // Manual or Triggered Synchronization
   const handleSyncBatches = React.useCallback(async (notifyIfEmpty = false) => {
@@ -479,6 +574,24 @@ export function Reception() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          {/* IndexedDB Storage Center & Diagnostics Button */}
+          <button
+            onClick={() => {
+              refreshMetrics();
+              setShowStorageModal(true);
+            }}
+            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300/80 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            title="Ver estado de base de datos IndexedDB local, historial persistente y respaldos"
+          >
+            <Database size={14} className="text-emerald-700" />
+            <span>Persistencia IndexedDB</span>
+            {storageMetrics && storageMetrics.pendingCount > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                {storageMetrics.pendingCount}
+              </span>
+            )}
+          </button>
+
           {/* Offline simulator toggle button for testing */}
           <button
             onClick={toggleSimulatedOffline}
@@ -1482,6 +1595,169 @@ export function Reception() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: DIAGNÓSTICO DE PERSISTENCIA INDEXEDDB Y RESPALDOS LOCALES          */}
+      {/* ========================================================================= */}
+      {showStorageModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto no-print">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-6 md:p-8 space-y-6 border border-slate-200 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                  <Database size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    Persistencia Local IndexedDB
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                      Alta Disponibilidad
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Base de datos transaccional en el navegador: protección total ante apagones y falta prolongada de internet.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowStorageModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Storage Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <span className="text-[11px] font-bold text-slate-400 block uppercase">Motor de Datos</span>
+                <span className="text-sm font-black text-emerald-800 flex items-center gap-1 mt-0.5">
+                  <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
+                  {storageMetrics?.dbType || 'IndexedDB'}
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <span className="text-[11px] font-bold text-slate-400 block uppercase">Cola Pendiente</span>
+                <span className="text-sm font-black text-amber-700 mt-0.5 block">
+                  {storageMetrics?.pendingCount || 0} boletas
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <span className="text-[11px] font-bold text-slate-400 block uppercase">Histórico Local</span>
+                <span className="text-sm font-black text-slate-800 mt-0.5 block">
+                  {storageMetrics?.historyCount || 0} registros
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <span className="text-[11px] font-bold text-slate-400 block uppercase">Catálogo Offline</span>
+                <span className="text-sm font-black text-purple-700 mt-0.5 block">
+                  {storageMetrics?.producersCount || 0} productores
+                </span>
+              </div>
+            </div>
+
+            {/* Action Bar: Export Backup & Force Sync */}
+            <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                  <Download size={15} className="text-emerald-700" />
+                  Copia de Seguridad y Exportación Local
+                </h4>
+                <p className="text-[11px] text-emerald-800 mt-0.5">
+                  Descargue todas las pesadas en archivo JSON estructurado para respaldo físico en USB.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  onClick={handleExportBackup}
+                  className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <Download size={14} />
+                  <span>Exportar Respaldo JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Audit Logs Table */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity size={14} className="text-emerald-600" />
+                  Registro de Auditoría de Báscula (Últimos Eventos)
+                </h4>
+                <button
+                  onClick={refreshMetrics}
+                  className="text-xs font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw size={12} />
+                  <span>Actualizar</span>
+                </button>
+              </div>
+
+              <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-52 overflow-y-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-[10px] sticky top-0">
+                    <tr>
+                      <th className="p-2.5">Hora</th>
+                      <th className="p-2.5">Evento</th>
+                      <th className="p-2.5">Detalle</th>
+                      <th className="p-2.5">Operador</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {auditLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-slate-400 font-sans">
+                          No hay eventos de auditoría registrados en IndexedDB aún.
+                        </td>
+                      </tr>
+                    ) : (
+                      auditLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-slate-50 font-sans">
+                          <td className="p-2.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                            {new Date(log.timestamp).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                              log.event === 'created_offline' ? 'bg-amber-100 text-amber-800' :
+                              log.event === 'sync_success' ? 'bg-emerald-100 text-emerald-800' :
+                              log.event === 'sync_error' ? 'bg-rose-100 text-rose-800' :
+                              'bg-blue-100 text-blue-800'
+                            }`}>
+                              {log.event}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-slate-700 text-xs font-medium">
+                            {log.description}
+                          </td>
+                          <td className="p-2.5 text-slate-500 text-[11px]">
+                            {log.operator || 'Báscula JBM'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setShowStorageModal(false)}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

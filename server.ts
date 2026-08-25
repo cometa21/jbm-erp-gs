@@ -98,6 +98,37 @@ db.exec(`
     payment_method TEXT DEFAULT 'Efectivo',
     date TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS production_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    calibre TEXT NOT NULL,
+    color TEXT NOT NULL,
+    quality TEXT NOT NULL,
+    presentation_id TEXT,
+    presentation_name TEXT,
+    boxes_count INTEGER DEFAULT 0,
+    weight_total_kg REAL NOT NULL,
+    destination TEXT NOT NULL,
+    operator TEXT DEFAULT 'Carlos Barragán',
+    cost_total REAL DEFAULT 0,
+    cost_per_box REAL DEFAULT 0,
+    date TEXT DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    FOREIGN KEY(batch_id) REFERENCES batches(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS production_discards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER,
+    type TEXT NOT NULL,
+    kg REAL NOT NULL,
+    impact_percent REAL DEFAULT 0,
+    trend TEXT DEFAULT 'Estable',
+    date TEXT DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    FOREIGN KEY(batch_id) REFERENCES batches(id)
+  );
 `);
 
 // Migration helper for SQLite existing tables
@@ -254,6 +285,33 @@ if (settlementCount.count === 0) {
   insertSettlement.run("LIQ-00041", 2, "2026-08-23 18:15:00", 3, 34500.00, 655500.00, 150.00, 25000.00, 630500.00, "pagado", "Transferencia");
   insertSettlement.run("LIQ-00040", 3, "2026-08-22 12:45:00", 2, 12800.00, 236800.00, 100.00, 12000.00, 224800.00, "pagado", "Cheque");
   insertSettlement.run("LIQ-00039", 4, "2026-08-21 16:00:00", 4, 45000.00, 832500.00, 200.00, 30000.00, 802500.00, "pagado", "Transferencia");
+}
+
+// Seed production runs if empty
+const prodCount = db.prepare("SELECT COUNT(*) as count FROM production_runs").get() as { count: number };
+if (prodCount.count === 0) {
+  const insertProd = db.prepare(`
+    INSERT INTO production_runs (batch_id, calibre, color, quality, presentation_id, presentation_name, boxes_count, weight_total_kg, destination, operator, cost_total, cost_per_box, date, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertProd.run(1, 'V-XX', 'verde', 'primera', 'caja_18kg', 'Caja JBM Export 18 kg (40 lbs)', 150, 2700, 'camara_fria', 'Carlos Barragán', 49950, 333, '2026-08-24 11:45:00', 'Fruta turgente de primera calidad');
+  insertProd.run(1, 'V-X', 'verde', 'primera', 'caja_18kg', 'Caja JBM Export 18 kg (40 lbs)', 120, 2160, 'piso_empaque', 'Carlos Barragán', 39960, 333, '2026-08-24 12:30:00', 'Palletizado en piso de empaque');
+  insertProd.run(1, 'AL-XX', 'alimonado', 'segunda', 'caja_20kg', 'Caja Nacional 20 kg', 80, 1600, 'transporte_directo', 'Carlos Barragán', 29600, 370, '2026-08-24 13:15:00', 'Destino Central de Abastos CDMX');
+  insertProd.run(1, 'AM-X', 'amarillo', 'industria', null, 'Granel / Molino', 0, 850, 'molino', 'Carlos Barragán', 15725, 0, '2026-08-24 14:00:00', 'Fruta sobremadura enviada a tolva de jugo');
+  insertProd.run(2, 'V-XXX', 'verde', 'primera', 'caja_18kg', 'Caja JBM Export 18 kg (40 lbs)', 200, 3600, 'camara_fria', 'Arturo Mendoza', 68400, 342, '2026-08-24 09:30:00', 'Cámara fría Rack 2');
+}
+
+// Seed production discards if empty
+const discardCount = db.prepare("SELECT COUNT(*) as count FROM production_discards").get() as { count: number };
+if (discardCount.count === 0) {
+  const insertDiscard = db.prepare(`
+    INSERT INTO production_discards (batch_id, type, kg, impact_percent, trend, date, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertDiscard.run(1, 'Mancha de Trips / Ácaro (Daño Superficial)', 320, 3.1, 'Baja', '2026-08-24 11:00:00', 'Afecta solo apariencia exterior');
+  insertDiscard.run(1, 'Partidura de Uña / Golpe de Cosecha', 180, 1.7, 'Estable', '2026-08-24 11:30:00', 'Manejo en campo');
+  insertDiscard.run(1, 'Sobremaduro / Fruta Amarilla no Industrial', 140, 1.3, 'Baja', '2026-08-24 12:00:00', 'Corte tardío');
+  insertDiscard.run(2, 'Roña / Mancha Grasosa (Clasif. B)', 290, 2.2, 'Alza', '2026-08-24 09:00:00', 'Revisar huerto origen');
 }
 
 async function startServer() {
@@ -719,6 +777,225 @@ async function startServer() {
       res.json(updated);
     } catch (err: any) {
       console.error("Error in POST /api/inventory/adjust:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Production & Classification Runs
+  app.get("/api/production", (req, res) => {
+    try {
+      const runs = db.prepare(`
+        SELECT 
+          pr.*,
+          COALESCE(b.folio, 'REC-' || printf('%05d', b.id)) as batch_folio,
+          COALESCE(p.name, 'Productor Desconocido') as producer_name,
+          COALESCE(b.orchard, 'Huerto General') as orchard
+        FROM production_runs pr
+        LEFT JOIN batches b ON pr.batch_id = b.id
+        LEFT JOIN producers p ON b.producer_id = p.id
+        ORDER BY pr.id DESC
+      `).all();
+
+      res.json(runs);
+    } catch (err: any) {
+      console.error("Error in GET /api/production:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/production/kpis", (req, res) => {
+    try {
+      const runs = db.prepare("SELECT * FROM production_runs").all() as any[];
+      const discards = db.prepare("SELECT * FROM production_discards").all() as any[];
+      const batches = db.prepare("SELECT * FROM batches").all() as any[];
+
+      const totalReceivedKg = batches.reduce((sum, b) => sum + (b.weight_net || 0), 0);
+      const totalProcessedKg = runs.reduce((sum, r) => sum + (r.weight_total_kg || 0), 0);
+      const totalDiscardKg = discards.reduce((sum, d) => sum + (d.kg || 0), 0);
+
+      // Kilos processed per batch
+      const processedByBatch: Record<number, number> = {};
+      runs.forEach(r => {
+        processedByBatch[r.batch_id] = (processedByBatch[r.batch_id] || 0) + (r.weight_total_kg || 0);
+      });
+
+      // Caliber distribution
+      const caliberDistribution: Record<string, number> = {};
+      runs.forEach(r => {
+        if (r.calibre) {
+          caliberDistribution[r.calibre] = (caliberDistribution[r.calibre] || 0) + (r.boxes_count > 0 ? r.boxes_count : Math.round(r.weight_total_kg / 18));
+        }
+      });
+
+      const efficiency = totalReceivedKg > 0 ? Math.min(100, Math.round(((totalProcessedKg) / (totalProcessedKg + totalDiscardKg || 1)) * 1000) / 10) : 94.2;
+      const merma = totalReceivedKg > 0 ? Math.round(((totalDiscardKg) / (totalReceivedKg || 1)) * 1000) / 10 : 3.8;
+
+      res.json({
+        totalReceivedKg,
+        totalProcessedKg,
+        totalDiscardKg,
+        efficiency: efficiency || 94.5,
+        merma: merma || 3.5,
+        produccion_hoy: totalProcessedKg,
+        processedByBatch,
+        caliberDistribution
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/production/kpis:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/production", (req, res) => {
+    try {
+      const {
+        batch_id,
+        calibre,
+        color,
+        quality = 'primera',
+        presentation_id,
+        presentation_name,
+        boxes_count = 0,
+        weight_total_kg,
+        destination = 'piso_empaque',
+        operator = 'Carlos Barragán',
+        notes = ''
+      } = req.body;
+
+      if (!batch_id || !calibre || !weight_total_kg) {
+        return res.status(400).json({ error: "Faltan campos obligatorios para registrar producción" });
+      }
+
+      // Check batch limits
+      const batch = db.prepare("SELECT * FROM batches WHERE id = ?").get(batch_id) as any;
+      if (!batch) {
+        return res.status(404).json({ error: "Lote no encontrado" });
+      }
+
+      const prevRuns = db.prepare("SELECT COALESCE(SUM(weight_total_kg), 0) as sum FROM production_runs WHERE batch_id = ?").get(batch_id) as { sum: number };
+      const alreadyProcessed = prevRuns?.sum || 0;
+      const availableKg = Math.max(0, (batch.weight_net || 0) - alreadyProcessed);
+
+      if (weight_total_kg > availableKg + 10) {
+        return res.status(400).json({ 
+          error: `Kilos insuficientes. Disponible: ${availableKg.toFixed(2)} kg, Solicitado: ${weight_total_kg.toFixed(2)} kg` 
+        });
+      }
+
+      // Calculate costs
+      const cost_per_kg = 22.05; // 18.50 fruit + 3.55 ops
+      const cost_total = Number((weight_total_kg * cost_per_kg).toFixed(2));
+      const cost_per_box = boxes_count > 0 ? Number((cost_total / boxes_count).toFixed(2)) : 0;
+
+      // Insert record
+      const result = db.prepare(`
+        INSERT INTO production_runs (batch_id, calibre, color, quality, presentation_id, presentation_name, boxes_count, weight_total_kg, destination, operator, cost_total, cost_per_box, date, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)
+      `).run(
+        batch_id,
+        calibre,
+        color,
+        quality,
+        presentation_id || null,
+        presentation_name || 'Granel',
+        boxes_count,
+        weight_total_kg,
+        destination,
+        operator,
+        cost_total,
+        cost_per_box,
+        notes
+      );
+
+      // Automatic BOM / Supply deductions
+      const deductions: { insumoNombre: string; cantidadDescontada: number }[] = [];
+      const errores: { insumoNombre: string; error: string }[] = [];
+
+      if (boxes_count > 0) {
+        // Deduct boxes
+        try {
+          const boxItem = db.prepare("SELECT * FROM inventory WHERE item_name LIKE '%Caja%' LIMIT 1").get() as any;
+          if (boxItem) {
+            db.prepare("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id = ?").run(boxes_count, boxItem.id);
+            deductions.push({ insumoNombre: boxItem.item_name, cantidadDescontada: boxes_count });
+          }
+        } catch (e: any) {
+          errores.push({ insumoNombre: 'Cajas', error: e.message });
+        }
+
+        // Deduct pallets HT if destination is storage
+        if (boxes_count >= 20) {
+          const palletsNeeded = Math.max(1, Math.round(boxes_count / 54));
+          try {
+            const palletItem = db.prepare("SELECT * FROM inventory WHERE item_name LIKE '%Pallet%' LIMIT 1").get() as any;
+            if (palletItem) {
+              db.prepare("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id = ?").run(palletsNeeded, palletItem.id);
+              deductions.push({ insumoNombre: palletItem.item_name, cantidadDescontada: palletsNeeded });
+            }
+          } catch (e: any) {
+            errores.push({ insumoNombre: 'Pallets HT', error: e.message });
+          }
+        }
+      }
+
+      // Update batch status to en_proceso
+      db.prepare("UPDATE batches SET status = 'en_proceso' WHERE id = ? AND status = 'pendiente'").run(batch_id);
+
+      const inserted = db.prepare(`
+        SELECT 
+          pr.*,
+          COALESCE(b.folio, 'REC-' || printf('%05d', b.id)) as batch_folio,
+          COALESCE(p.name, 'Productor') as producer_name
+        FROM production_runs pr
+        LEFT JOIN batches b ON pr.batch_id = b.id
+        LEFT JOIN producers p ON b.producer_id = p.id
+        WHERE pr.id = ?
+      `).get(result.lastInsertRowid);
+
+      res.json({
+        record: inserted,
+        deducciones: deductions,
+        errores: errores,
+        kilosDisponiblesRestantes: Math.max(0, availableKg - weight_total_kg)
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/production:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Discards and Quality Defects
+  app.get("/api/production/discards", (req, res) => {
+    try {
+      const discards = db.prepare(`
+        SELECT 
+          pd.*,
+          COALESCE(b.folio, 'REC-' || printf('%05d', b.id)) as batch_folio,
+          COALESCE(p.name, 'Productor') as producer_name
+        FROM production_discards pd
+        LEFT JOIN batches b ON pd.batch_id = b.id
+        LEFT JOIN producers p ON b.producer_id = p.id
+        ORDER BY pd.id DESC
+      `).all();
+
+      res.json(discards);
+    } catch (err: any) {
+      console.error("Error in GET /api/production/discards:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/production/discards", (req, res) => {
+    try {
+      const { batch_id, type, kg, impact_percent = 2.0, trend = 'Estable', notes = '' } = req.body;
+      const result = db.prepare(`
+        INSERT INTO production_discards (batch_id, type, kg, impact_percent, trend, date, notes)
+        VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)
+      `).run(batch_id || null, type, kg, impact_percent, trend, notes);
+
+      res.json({ id: result.lastInsertRowid, type, kg });
+    } catch (err: any) {
+      console.error("Error in POST /api/production/discards:", err);
       res.status(500).json({ error: err.message });
     }
   });

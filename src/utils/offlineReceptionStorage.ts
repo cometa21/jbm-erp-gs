@@ -1,39 +1,27 @@
 /**
  * Gestor de persistencia y sincronización fuera de línea (Offline Storage & Sync)
  * para el módulo de Recepción y Báscula de Cítricos JBM.
+ * 
+ * Integra IndexedDB de alto rendimiento con respaldo en localStorage.
  */
 
 import type { Batch } from '../types';
-import { saveCloudBatch } from '../lib/cloudService';
+import {
+  saveOfflineBatchToIndexedDB,
+  getPendingBatchesFromIndexedDB,
+  updateBatchStatusInIndexedDB,
+  removePendingBatchFromIndexedDB,
+  syncAllIndexedDBBatches,
+  type OfflineBatchRecord
+} from './indexedDbManager';
 
-export interface OfflineBatchPayload {
-  tempId: string;
-  created_at: string;
-  scale_ticket_folio?: string;
-  producer_id: number | null;
-  producer_name?: string;
-  origin: string;
-  orchard: string;
-  variety: string;
-  weight_gross: number;
-  weight_tare: number;
-  weight_net: number;
-  price_per_kg: number;
-  subtotal: number;
-  scale_fee: number;
-  scale_fee_payment: 'descuento' | 'efectivo';
-  extra_charge_per_kg: number;
-  extra_charge_total: number;
-  extra_charge_concept: string;
-  total: number;
-  operator: string;
-  notes: string;
-  sync_status: 'pending' | 'syncing' | 'failed';
-  error_message?: string;
-}
+export type OfflineBatchPayload = OfflineBatchRecord;
 
 const STORAGE_KEY = 'jbm_reception_offline_queue_v1';
 
+/**
+ * Obtiene las boletas pendientes desde localStorage (síncrono)
+ */
 export function getOfflineBatches(): OfflineBatchPayload[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -46,7 +34,19 @@ export function getOfflineBatches(): OfflineBatchPayload[] {
   }
 }
 
-export function saveOfflineBatch(payload: Omit<OfflineBatchPayload, 'tempId' | 'created_at' | 'sync_status'>): OfflineBatchPayload {
+/**
+ * Obtiene las boletas pendientes desde IndexedDB (asíncrono)
+ */
+export async function getOfflineBatchesAsync(): Promise<OfflineBatchPayload[]> {
+  return await getPendingBatchesFromIndexedDB();
+}
+
+/**
+ * Guarda una nueva boleta offline tanto en IndexedDB como en localStorage
+ */
+export function saveOfflineBatch(
+  payload: Omit<OfflineBatchPayload, 'tempId' | 'created_at' | 'sync_status'>
+): OfflineBatchPayload {
   const current = getOfflineBatches();
   const timestamp = new Date().toISOString();
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -56,9 +56,11 @@ export function saveOfflineBatch(payload: Omit<OfflineBatchPayload, 'tempId' | '
     ...payload,
     tempId,
     created_at: timestamp,
-    sync_status: 'pending'
+    sync_status: 'pending',
+    sync_attempts: 0
   };
 
+  // 1. Guardar síncrono en localStorage
   const updated = [newOfflineBatch, ...current];
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
@@ -66,10 +68,31 @@ export function saveOfflineBatch(payload: Omit<OfflineBatchPayload, 'tempId' | '
     console.error('Error writing offline batch to localStorage:', err);
   }
 
+  // 2. Guardar asíncrono en IndexedDB para máxima durabilidad
+  saveOfflineBatchToIndexedDB(payload).catch(err => {
+    console.warn('Error delegating to IndexedDB:', err);
+  });
+
   return newOfflineBatch;
 }
 
-export function updateOfflineBatchStatus(tempId: string, status: 'pending' | 'syncing' | 'failed', errorMessage?: string): void {
+/**
+ * Guarda de forma asíncrona directamente en IndexedDB
+ */
+export async function saveOfflineBatchAsync(
+  payload: Omit<OfflineBatchPayload, 'tempId' | 'created_at' | 'sync_status'>
+): Promise<OfflineBatchPayload> {
+  return await saveOfflineBatchToIndexedDB(payload);
+}
+
+/**
+ * Actualiza el estado de una boleta offline
+ */
+export function updateOfflineBatchStatus(
+  tempId: string,
+  status: 'pending' | 'syncing' | 'failed' | 'synced',
+  errorMessage?: string
+): void {
   const current = getOfflineBatches();
   const updated = current.map(item => {
     if (item.tempId === tempId) {
@@ -80,20 +103,32 @@ export function updateOfflineBatchStatus(tempId: string, status: 'pending' | 'sy
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch (err) {
-    console.error('Error updating offline batch:', err);
+    console.error('Error updating offline batch in localStorage:', err);
   }
+
+  // Actualizar también en IndexedDB
+  updateBatchStatusInIndexedDB(tempId, status, errorMessage).catch(() => {});
 }
 
+/**
+ * Elimina una boleta de la cola offline
+ */
 export function removeOfflineBatch(tempId: string): void {
   const current = getOfflineBatches();
   const updated = current.filter(item => item.tempId !== tempId);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch (err) {
-    console.error('Error deleting offline batch:', err);
+    console.error('Error deleting offline batch from localStorage:', err);
   }
+
+  // Eliminar también en IndexedDB
+  removePendingBatchFromIndexedDB(tempId).catch(() => {});
 }
 
+/**
+ * Limpia todas las boletas offline
+ */
 export function clearAllOfflineBatches(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
@@ -130,79 +165,28 @@ export function offlineBatchToBatch(item: OfflineBatchPayload): Batch {
     total: item.total,
     status: 'completado',
     operator: item.operator,
-    notes: item.notes ? `${item.notes} [Guardado Offline]` : '[Guardado Offline sin conexión]'
+    notes: item.notes ? `${item.notes} [Persistencia IndexedDB]` : '[Persistencia IndexedDB]'
   };
 }
 
 /**
- * Sincroniza todos los lotes pendientes hacia el servidor
+ * Sincroniza todos los lotes pendientes hacia el servidor mediante IndexedDB y API
  */
-export async function syncAllOfflineBatches(onProgress?: (syncedCount: number, total: number) => void): Promise<{ successCount: number; failCount: number; syncedBatches: Batch[] }> {
-  const pending = getOfflineBatches();
-  if (pending.length === 0) {
-    return { successCount: 0, failCount: 0, syncedBatches: [] };
-  }
-
-  let successCount = 0;
-  let failCount = 0;
-  const syncedBatches: Batch[] = [];
-
-  for (let i = 0; i < pending.length; i++) {
-    const item = pending[i];
-    updateOfflineBatchStatus(item.tempId, 'syncing');
-
+export async function syncAllOfflineBatches(
+  onProgress?: (syncedCount: number, total: number) => void
+): Promise<{ successCount: number; failCount: number; syncedBatches: Batch[] }> {
+  // Sincronizar usando el gestor de IndexedDB
+  const result = await syncAllIndexedDBBatches(onProgress);
+  
+  // Limpiar los sincronizados de localStorage
+  result.syncedBatches.forEach(b => {
+    // Si tenemos tempIds en localStorage, sincronizar
+    const current = getOfflineBatches();
+    const remaining = current.filter(item => item.sync_status !== 'synced');
     try {
-      const response = await fetch('/api/batches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scale_ticket_folio: item.scale_ticket_folio,
-          producer_id: item.producer_id,
-          origin: item.origin,
-          orchard: item.orchard,
-          variety: item.variety,
-          weight_gross: item.weight_gross,
-          weight_tare: item.weight_tare,
-          price_per_kg: item.price_per_kg,
-          scale_fee: item.scale_fee,
-          scale_fee_payment: item.scale_fee_payment,
-          extra_charge_per_kg: item.extra_charge_per_kg,
-          extra_charge_concept: item.extra_charge_concept,
-          operator: item.operator,
-          notes: item.notes ? `${item.notes} [Sincronizado tras reconexión]` : '[Sincronizado tras reconexión]'
-        })
-      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+    } catch (e) {}
+  });
 
-      if (!response.ok) {
-        throw new Error(`HTTP Error ${response.status}: ${response.statusText}`);
-      }
-
-      const createdBatch: Batch = await response.json();
-      
-      // Save also to Cloud Firestore for cloud backup & remote dashboard access
-      try {
-        await saveCloudBatch({
-          ...createdBatch,
-          offlineSynced: true,
-          originalTempId: item.tempId
-        } as any);
-      } catch (cloudErr) {
-        console.warn('Cloud sync mirror error (non-fatal):', cloudErr);
-      }
-
-      syncedBatches.push(createdBatch);
-      removeOfflineBatch(item.tempId);
-      successCount++;
-    } catch (err: any) {
-      console.error(`Error synchronizing offline batch ${item.tempId}:`, err);
-      updateOfflineBatchStatus(item.tempId, 'failed', err?.message || 'Fallo de conexión');
-      failCount++;
-    }
-
-    if (onProgress) {
-      onProgress(i + 1, pending.length);
-    }
-  }
-
-  return { successCount, failCount, syncedBatches };
+  return result;
 }

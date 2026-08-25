@@ -50,6 +50,45 @@ export interface DashboardStats {
   alerts: { id: number; type: string; message: string }[];
 }
 
+export interface ProductionRecord {
+  id: number;
+  batch_id: number;
+  batch_folio?: string;
+  producer_name?: string;
+  orchard?: string;
+  calibre: string;
+  color: 'verde' | 'alimonado' | 'amarillo';
+  quality: 'primera' | 'segunda' | 'industria';
+  presentation_id?: string | null;
+  presentation_name?: string;
+  boxes_count: number;
+  weight_total_kg: number;
+  destination: 'piso_empaque' | 'camara_fria' | 'transporte_directo' | 'molino';
+  operator: string;
+  cost_total?: number;
+  cost_per_box?: number;
+  date: string;
+  notes?: string;
+}
+
+export interface ProductionPresentation {
+  id: string;
+  name: string;
+  weight_kg: number;
+  box_type: string;
+}
+
+export interface DiscardReportRow {
+  id: number;
+  batch_id?: number;
+  type: string;
+  kg: number;
+  impact_percent: number;
+  trend: 'Alza' | 'Baja' | 'Estable';
+  date: string;
+  notes?: string;
+}
+
 export interface Settlement {
   id: number;
   folio: string;
