@@ -33,3 +33,49 @@
   background-image: radial-gradient(circle at 1px 1px, #e2e8f0 1px, transparent 0);
   background-size: 24px 24px;
 }
+
+/* Print Styling for Thermal Receipts and Documents */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide navigation, sidebars, buttons and modals backgrounds when printing */
+  aside,
+  header,
+  nav,
+  .no-print,
+  button,
+  .fixed:not(#print-modal-container) {
+    display: none !important;
+  }
+
+  #print-modal-container {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .thermal-receipt {
+    box-shadow: none !important;
+    border: none !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 3mm !important;
+  }
+
+  .printable-document {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 10mm !important;
+  }
+}
+

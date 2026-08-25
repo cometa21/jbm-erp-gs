@@ -11,6 +11,11 @@ import { Reception } from './components/Reception';
 import { ColdStorage } from './components/ColdStorage';
 import { POS } from './components/POS';
 import { Supplies } from './components/Supplies';
+import { Production } from './components/Production';
+import { Logistics } from './components/Logistics';
+import { Finances } from './components/Finances';
+import { Documents } from './components/Documents';
+import { SettingsPage } from './components/SettingsPage';
 
 export default function App() {
   return (
@@ -21,20 +26,19 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/recepcion" element={<Reception />} />
+            <Route path="/produccion" element={<Production />} />
             <Route path="/camara" element={<ColdStorage />} />
             <Route path="/ventas" element={<POS />} />
+            <Route path="/logistica" element={<Logistics />} />
+            <Route path="/finanzas" element={<Finances />} />
+            <Route path="/documentos" element={<Documents />} />
             <Route path="/insumos" element={<Supplies />} />
-            {/* Placeholder routes for others */}
-            <Route path="*" element={
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4">
-                <h2 className="text-2xl font-bold">Módulo en Desarrollo</h2>
-                <p>Esta sección estará disponible próximamente.</p>
-              </div>
-            } />
+            <Route path="/config" element={<SettingsPage />} />
           </Routes>
         </main>
       </div>
     </Router>
   );
 }
+
 
