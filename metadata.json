@@ -1,0 +1,7 @@
+{
+  "name": "JBM Cítricos Premium ERP",
+  "description": "Sistema integral de gestión para exportación y distribución de cítricos, incluyendo recepción, producción, logística, finanzas y punto de venta.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
