@@ -201,3 +201,176 @@ export interface SearchApiResponse {
   results: SearchResultItem[];
 }
 
+// ==========================================
+// POS CDMX MODULE TYPES
+// ==========================================
+
+export type POSUserRole = 'admin' | 'ventas' | 'almacen' | 'finanzas';
+export type POSTabType = 'ventas' | 'recepciones' | 'inventario' | 'corte_caja' | 'gastos' | 'rentabilidad';
+
+export interface POSTransferItem {
+  presentation_id: string;
+  presentation_name: string;
+  calibre: string;
+  quality?: string;
+  boxes_sent: number;
+  kg_per_box: number;
+  total_kg_sent: number;
+  cost_unit_kg: number;
+  default_sale_price_kg?: number;
+  default_sale_price_box?: number;
+}
+
+export interface POSTransferReceivedItem extends POSTransferItem {
+  boxes_received: number;
+  total_kg_received: number;
+  discrepancy_boxes: number;
+  discrepancy_kg: number;
+  sale_price_kg: number;
+  sale_price_box: number;
+}
+
+export interface POSTransfer {
+  id: number;
+  folio: string;
+  origin: string;
+  destination_bodega: string;
+  driver_name: string;
+  driver_license?: string;
+  plates_truck: string;
+  departure_date: string;
+  arrival_date?: string;
+  status: 'en_transito' | 'recibido' | 'con_discrepancia';
+  thermograph_temp: number;
+  items_json: string;
+  items_received_json?: string;
+  discrepancy_notes?: string;
+  evidence_photo_url?: string;
+  operator_departure: string;
+  operator_reception?: string;
+  reception_date?: string;
+  notes?: string;
+  items: POSTransferItem[];
+  items_received?: POSTransferReceivedItem[];
+}
+
+export interface POSInventoryItem {
+  id: number;
+  item_type: 'caja' | 'granel';
+  presentation_name: string;
+  calibre: string;
+  quality: string;
+  lot_code: string;
+  boxes_stock: number;
+  kg_per_box: number;
+  kg_stock: number;
+  base_cost_per_kg: number;
+  min_price_per_unit: number;
+  default_sale_price: number;
+  status: 'disponible' | 'bajo_stock' | 'agotado';
+  received_date: string;
+  notes?: string;
+  costPerUnit?: number;
+  marginAmount?: number;
+  marginPercent?: number;
+}
+
+export interface POSCartItem {
+  inventory_id: number;
+  name: string;
+  item_type: 'caja' | 'granel';
+  calibre: string;
+  lot_code: string;
+  qty: number;
+  unit_price: number;
+  subtotal: number;
+  cost_unit_kg: number;
+  kg_total: number;
+  min_price_per_unit: number;
+}
+
+export interface POSSale {
+  id: number;
+  folio: string;
+  customer_type: 'mostrador' | 'mayorista' | 'taqueria' | 'fruteria' | 'restaurante';
+  customer_name: string;
+  customer_phone?: string;
+  customer_rfc?: string;
+  items_json: string;
+  subtotal: number;
+  discount_percent: number;
+  discount_amount: number;
+  tax_amount: number;
+  total: number;
+  payment_method: 'Efectivo' | 'Tarjeta' | 'Transferencia' | 'Mixto' | 'Credito';
+  cash_received: number;
+  cash_change: number;
+  payment_reference?: string;
+  status: 'completada' | 'cancelada';
+  operator: string;
+  shift_id?: number;
+  date: string;
+  notes?: string;
+  invoice_requested: number;
+  items: POSCartItem[];
+}
+
+export interface POSLocalExpense {
+  id: number;
+  folio: string;
+  date: string;
+  concept: string;
+  category: 'Maniobra y Descarga' | 'Combustible y Flete Local' | 'Alimentos Personal' | 'Empaque y Cintas' | 'Mantenimiento y Servicios' | 'Renta y Servicios' | 'Otros';
+  amount: number;
+  payment_source: 'caja_efectivo' | 'transferencia_banco';
+  supplier?: string;
+  invoice_folio?: string;
+  receipt_image_url?: string;
+  operator: string;
+  ocr_data_json?: string;
+  notes?: string;
+}
+
+export interface POSCashCut {
+  id: number;
+  folio: string;
+  date: string;
+  shift: 'Matutino' | 'Vespertino' | 'Nocturno';
+  operator: string;
+  initial_fund: number;
+  declared_cash: number;
+  calculated_cash: number;
+  difference: number;
+  status: 'cuadrado' | 'sobrante' | 'faltante';
+  total_sales_amount: number;
+  total_cash_sales: number;
+  total_card_sales: number;
+  total_transfer_sales: number;
+  total_credit_sales: number;
+  total_local_expenses_cash: number;
+  total_boxes_sold: number;
+  total_kg_granel_sold: number;
+  denominations_json?: string;
+  denominations?: Record<string, number>;
+  notes?: string;
+}
+
+export interface POSProfitabilityData {
+  totalGrossRevenue: number;
+  totalFruitBaseCost: number;
+  totalFreightCost: number;
+  totalCostOfGoods: number;
+  totalLocalExpenses: number;
+  grossMargin: number;
+  grossMarginPercent: number;
+  netProfit: number;
+  netMarginPercent: number;
+  roi: number;
+  totalKgSold: number;
+  totalBoxesSold: number;
+  avgSalePricePerKg: number;
+  avgCostPerKg: number;
+  salesByCalibre: Record<string, { revenue: number; kg: number; cost: number; profit: number }>;
+  expensesByCategory: Record<string, number>;
+}
+

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { exportShipmentsReport, type ShipmentData } from '../utils/financialExport';
+import { generateDispatchGuidePdf, type DispatchGuideData } from '../utils/pdfExport';
 
 const INITIAL_SHIPMENTS: ShipmentData[] = [
   {
@@ -171,6 +172,62 @@ export function Logistics() {
     );
     setExportFeedback(`Reporte de Embarques (${filteredShipments.length} despachos) exportado en formato ${format.toUpperCase()} para integración contable/ERP.`);
     setTimeout(() => setExportFeedback(null), 5500);
+  };
+
+  const handleDownloadDispatchPdf = (shipment: ShipmentData) => {
+    try {
+      const isExport = shipment.dest.toLowerCase().includes('usa') || shipment.dest.toLowerCase().includes('tx') || shipment.dest.toLowerCase().includes('veracruz');
+      const guideData: DispatchGuideData = {
+        folio: `GUIA-${shipment.id.replace('EMB-', '')}`,
+        cfdiCartaPorte: shipment.cfdiCartaPorte || `CP30-JBM-${Math.floor(100000 + Math.random() * 900000)}`,
+        departureDate: shipment.departureDate || new Date().toISOString().slice(0, 10),
+        departureTime: '14:30 hrs',
+        eta: shipment.eta || 'Próximo arribo',
+        regime: isExport ? 'Exportación Definitiva Clave A1 (EE.UU.)' : 'Nacional Mercado Interno',
+        destinationName: shipment.dest,
+        destinationAddress: shipment.dest,
+        carrierName: shipment.carrier,
+        driverName: shipment.driver,
+        driverLicense: 'LIC-FED-849201-B',
+        truckPlates: shipment.plates,
+        trailerPlates: 'CA-552 Refrigerada',
+        sealNumber: shipment.sealNumber || 'MX-SAT-884920',
+        thermographId: 'TEMP-LOG-99201',
+        tempSetpoint: shipment.temp,
+        tempObserved: shipment.temp,
+        senasicaCertificate: 'SENASICA-MEX-VER-CIT-2026-88492',
+        dispatcherName: 'CARLOS BARRAGÁN M.',
+        items: [
+          {
+            palletNumber: `PLT-${shipment.id}-01`,
+            variety: 'Limón Persa Calidad Exportación #1',
+            calibre: 'Calibre 175 / 200',
+            packaging: isExport ? 'Caja JBM Export 40 lbs (18.14 kg)' : 'Caja Plástica 15 kg',
+            boxesCount: Math.round((shipment.boxesCount || 1200) * 0.6),
+            weightNetKg: Number(((shipment.weightTon || 22) * 1000 * 0.6).toFixed(1)),
+            weightGrossKg: Number(((shipment.weightTon || 22) * 1000 * 0.6 * 1.05).toFixed(1)),
+            temperature: shipment.temp
+          },
+          {
+            palletNumber: `PLT-${shipment.id}-02`,
+            variety: 'Limón Persa Seleccionado',
+            calibre: 'Calibre 230',
+            packaging: isExport ? 'Caja JBM Export 40 lbs (18.14 kg)' : 'Bulto Malla 20 kg',
+            boxesCount: Math.round((shipment.boxesCount || 1200) * 0.4),
+            weightNetKg: Number(((shipment.weightTon || 22) * 1000 * 0.4).toFixed(1)),
+            weightGrossKg: Number(((shipment.weightTon || 22) * 1000 * 0.4 * 1.05).toFixed(1)),
+            temperature: shipment.temp
+          }
+        ]
+      };
+
+      generateDispatchGuidePdf(guideData);
+      setExportFeedback(`✅ Guía de Despacho oficial para embarque ${shipment.id} descargada en PDF.`);
+      setTimeout(() => setExportFeedback(null), 5000);
+    } catch (e: any) {
+      console.error('Error generating guide PDF:', e);
+      setExportFeedback(`❌ Error al generar Guía PDF: ${e.message}`);
+    }
   };
 
   const handleCreateShipment = (e: React.FormEvent) => {
@@ -445,13 +502,22 @@ export function Logistics() {
                       </span>
                     </td>
                     <td className="p-4 text-center font-sans">
-                      <button
-                        onClick={() => setSelectedShipment(item)}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                        title="Ver detalle de Carta Porte"
-                      >
-                        Ver Detalle
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleDownloadDispatchPdf(item)}
+                          className="p-1.5 bg-emerald-50 hover:bg-emerald-700 hover:text-white text-emerald-800 rounded-lg text-xs font-bold transition-all cursor-pointer border border-emerald-200 shadow-2xs"
+                          title="Descargar Guía de Despacho Oficial en PDF"
+                        >
+                          <Download size={13} />
+                        </button>
+                        <button
+                          onClick={() => setSelectedShipment(item)}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          title="Ver detalle de Carta Porte"
+                        >
+                          Detalle
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -522,7 +588,14 @@ export function Logistics() {
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+            <div className="pt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100">
+              <button
+                onClick={() => handleDownloadDispatchPdf(selectedShipment)}
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Download size={14} className="text-amber-400" />
+                <span>Descargar Guía PDF Membretada</span>
+              </button>
               <button
                 onClick={() => {
                   window.print();
@@ -530,7 +603,7 @@ export function Logistics() {
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer size={14} />
-                <span>Imprimir Carta Porte</span>
+                <span>Imprimir</span>
               </button>
               <button
                 onClick={() => setSelectedShipment(null)}

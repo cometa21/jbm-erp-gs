@@ -40,6 +40,7 @@ import {
   exportToCSV,
   exportToExcelXML
 } from '../utils/financialExport';
+import { generateSettlementPdf } from '../utils/pdfExport';
 
 export function Finances() {
   const [settlements, setSettlements] = React.useState<Settlement[]>([]);
@@ -1173,20 +1174,31 @@ export function Finances() {
                 <span>Imprimir Póliza</span>
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => {
+                    const prod = producers.find(p => p.id === selectedSettlement.producer_id);
+                    generateSettlementPdf(selectedSettlement, prod);
+                  }}
+                  className="bg-emerald-800 hover:bg-emerald-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Descargar Boleta Oficial de Liquidación con Membrete JBM en PDF"
+                >
+                  <Download size={15} className="text-amber-400" />
+                  <span>Boleta PDF Membretada</span>
+                </button>
                 <button
                   onClick={() => exportSingleSettlementVoucher(selectedSettlement, producers.find(p => p.id === selectedSettlement.producer_id), 'excel')}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <FileSpreadsheet size={15} />
-                  <span>Descargar Excel</span>
+                  <span>Excel</span>
                 </button>
                 <button
                   onClick={() => exportSingleSettlementVoucher(selectedSettlement, producers.find(p => p.id === selectedSettlement.producer_id), 'csv')}
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <Table size={15} />
-                  <span>Descargar CSV</span>
+                  <span>CSV</span>
                 </button>
               </div>
             </div>
