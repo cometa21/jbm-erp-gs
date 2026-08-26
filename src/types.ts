@@ -105,3 +105,48 @@ export interface Settlement {
   payment_method: 'Transferencia' | 'Cheque' | 'Efectivo';
 }
 
+export interface Pallet {
+  id: number;
+  pallet_number: string;
+  batch_id: number;
+  batch_folio?: string;
+  producer_name?: string;
+  orchard?: string;
+  calibre: string;
+  color: 'verde' | 'alimonado' | 'amarillo';
+  quality: string;
+  presentation_name?: string;
+  boxes_count: number;
+  weight_kg: number;
+  location_zone: string; // e.g. 'A1', 'A2', 'B1', 'B2', 'C1', 'Piso Empaque'
+  status: 'en_camara' | 'en_piso' | 'en_transito' | 'entregado';
+  packed_date: string;
+  operator: string;
+  treatment?: string;
+  notes?: string;
+}
+
+export interface Shipment {
+  id: number;
+  folio: string;
+  destination: string;
+  client_name?: string;
+  carrier_name: string;
+  driver_name: string;
+  driver_license: string;
+  plates_truck: string;
+  plates_trailer?: string;
+  thermograph_id?: string;
+  seal_number?: string;
+  total_pallets: number;
+  total_boxes: number;
+  total_kg: number;
+  status: 'preparando' | 'en_transito' | 'entregado' | 'cancelado';
+  departure_date: string;
+  eta: string;
+  temp_celsius: number;
+  operator?: string;
+  notes?: string;
+  pallets?: Pallet[];
+}
+

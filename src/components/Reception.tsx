@@ -31,10 +31,13 @@ import {
   Download,
   ShieldCheck,
   Activity,
-  Layers
+  Layers,
+  Trash2
 } from 'lucide-react';
 import type { Producer, Batch } from '../types';
+import { ConfirmationModal, type SummaryItem, type ConfirmationVariant } from './ConfirmationModal';
 import { ThermalTicket, type TicketData } from './ThermalTicket';
+import { ThermalReceiptPreview, type WeighInReceiptData } from './ThermalReceiptPreview';
 import { Logo } from './Logo';
 import { calculateReceptionTotals } from '../utils/receptionCalculations';
 import { saveCloudBatch } from '../lib/cloudService';
@@ -116,6 +119,26 @@ export function Reception() {
     phone: '',
     location: '',
     default_orchard: ''
+  });
+
+  // Reusable Confirmation Modal State
+  const [confirmModal, setConfirmModal] = React.useState<{
+    isOpen: boolean;
+    title: string;
+    description?: React.ReactNode;
+    variant?: ConfirmationVariant;
+    icon?: React.ReactNode;
+    confirmText?: string;
+    cancelText?: string;
+    summaryItems?: SummaryItem[];
+    confirmInputRequired?: string;
+    onConfirm: () => Promise<void> | void;
+    isLoading?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    onConfirm: () => {},
+    variant: 'warning'
   });
 
   // Refresh Storage Metrics
@@ -370,10 +393,91 @@ export function Reception() {
     }));
   };
 
-  // Save new Batch (with offline resilience and auto-sync)
-  const handleSubmit = async (e: React.FormEvent, shouldPrintImmediate = false) => {
+  // Prompt confirmation modal before finalizing weigh-in ticket
+  const promptFinalizeWeighIn = (e: React.FormEvent, shouldPrintImmediate = false) => {
     e.preventDefault();
 
+    if (grossNum <= 0) {
+      setSyncFeedback({
+        type: 'warning',
+        message: 'Debe ingresar un Peso Bruto válido (mayor a 0 kg).'
+      });
+      return;
+    }
+
+    if (tareNum >= grossNum) {
+      setSyncFeedback({
+        type: 'warning',
+        message: 'La Tara del camión no puede ser mayor o igual al Peso Bruto.'
+      });
+      return;
+    }
+
+    if (priceNum <= 0) {
+      setSyncFeedback({
+        type: 'warning',
+        message: 'Debe especificar un Precio por Kilogramo mayor a $0.00.'
+      });
+      return;
+    }
+
+    const producerLabel = selectedProducer ? selectedProducer.name : (formData.producer_id === '' ? 'SIN ASIGNAR' : 'Productor Local');
+
+    setConfirmModal({
+      isOpen: true,
+      title: shouldPrintImmediate ? '¿Confirmar, Guardar e Imprimir Boleta?' : '¿Confirmar y Finalizar Boleta de Báscula?',
+      description: (
+        <div className="space-y-2 text-slate-600">
+          <p>
+            Revise cuidadosamente las lecturas de báscula antes de asentar el pesaje definitivo.
+          </p>
+          {effectiveIsOffline && (
+            <p className="text-amber-800 bg-amber-50 p-2 rounded-xl text-xs border border-amber-200 font-medium">
+              ⚡ <strong>Atención:</strong> El sistema está operando en <strong>Modo Sin Conexión</strong>. La boleta se certificará localmente en IndexedDB y se sincronizará cuando haya conexión.
+            </p>
+          )}
+        </div>
+      ),
+      variant: 'emerald',
+      icon: shouldPrintImmediate ? <Printer size={24} className="text-amber-500" /> : <Scale size={24} className="text-emerald-700" />,
+      confirmText: shouldPrintImmediate ? 'Confirmar e Imprimir Ticket' : 'Confirmar y Guardar Pesaje',
+      cancelText: 'Volver a Editar',
+      summaryItems: [
+        { label: 'Folio Báscula Ref.', value: formData.scale_ticket_folio || 'Báscula #1' },
+        { label: 'Productor', value: producerLabel },
+        { label: 'Huerto / Origen', value: `${formData.orchard} (${formData.origin})` },
+        { label: 'Peso Bruto', value: `${grossNum.toLocaleString('es-MX', { minimumFractionDigits: 2 })} kg` },
+        { label: 'Tara Vehículo', value: `-${tareNum.toLocaleString('es-MX', { minimumFractionDigits: 2 })} kg` },
+        { 
+          label: 'PESO NETO CERTIFICADO', 
+          value: `${netNum.toLocaleString('es-MX', { minimumFractionDigits: 2 })} kg`, 
+          highlighted: true,
+          badge: 'FRUTA NETA',
+          badgeColor: 'bg-emerald-100 text-emerald-900'
+        },
+        { label: 'Precio Fruta / Kg', value: `$${priceNum.toFixed(2)} / kg` },
+        { 
+          label: 'TOTAL NETO A LIQUIDAR', 
+          value: `$${totalNum.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`, 
+          highlighted: true,
+          badge: 'LIQUIDACIÓN',
+          badgeColor: 'bg-amber-100 text-amber-900 font-mono font-bold'
+        },
+        { label: 'Operador de Báscula', value: formData.operator || 'Carlos Barragán' }
+      ],
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          await executeSubmitWeighIn(shouldPrintImmediate);
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
+  };
+
+  // Execute Save new Batch (with offline resilience and auto-sync)
+  const executeSubmitWeighIn = async (shouldPrintImmediate = false) => {
     const payloadData = {
       scale_ticket_folio: formData.scale_ticket_folio || undefined,
       producer_id: formData.producer_id ? parseInt(formData.producer_id) : null,
@@ -486,6 +590,122 @@ export function Reception() {
         setSelectedTicket(localBatch);
       }
     }
+  };
+
+  // Prompt confirmation modal before deleting a batch record
+  const handleDeleteBatchPrompt = (batch: Batch | (Batch & { isOfflinePending?: boolean; rawOfflineId?: string })) => {
+    const isOffline = (batch as any).isOfflinePending || (batch.folio && (batch.folio.includes('TEMPORAL') || batch.folio.includes('OFF-')));
+    const rawOfflineId = (batch as any).rawOfflineId;
+    const batchFolio = batch.folio || `#REC-${String(batch.id).padStart(5, '0')}`;
+
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar Boleta de Recepción de Báscula?',
+      description: (
+        <div className="space-y-2">
+          <p>
+            Esta acción eliminará el registro de pesaje permanentemente. Si la boleta está asociada a la cuenta de un productor, se revertirá el saldo acumulado correspondiente.
+          </p>
+          <p className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
+            ⚠️ Confirme que no existan liquidaciones de pago ya cobradas ni procesos de empaque activos dependientes de este lote.
+          </p>
+        </div>
+      ),
+      variant: 'danger',
+      icon: <Trash2 size={24} className="text-rose-600" />,
+      confirmText: 'Eliminar Boleta Definitivamente',
+      cancelText: 'Cancelar',
+      summaryItems: [
+        { label: 'Folio de Recepción', value: batchFolio },
+        { label: 'Productor', value: batch.producer_name || 'Sin Asignar' },
+        { label: 'Peso Neto Fruta', value: `${(batch.weight_net || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })} kg` },
+        { 
+          label: 'Total Liquidación', 
+          value: `$${(batch.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`, 
+          highlighted: true 
+        },
+        { 
+          label: 'Ubicación de Datos', 
+          value: isOffline ? 'Memoria Local IndexedDB (Pendiente)' : 'Base de Datos Central' 
+        }
+      ],
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          if (isOffline && rawOfflineId) {
+            removeOfflineBatch(rawOfflineId);
+            refreshOfflineQueue();
+            await refreshMetrics();
+            setSyncFeedback({
+              type: 'info',
+              message: `🗑️ Boleta offline ${rawOfflineId} eliminada de la cola local.`
+            });
+            setTimeout(() => setSyncFeedback(null), 4000);
+          } else {
+            const res = await fetch(`/api/batches/${batch.id}`, { method: 'DELETE' });
+            if (!res.ok) {
+              const errData = await res.json();
+              throw new Error(errData.error || 'Error al eliminar');
+            }
+            fetchData();
+            await refreshMetrics();
+            setSyncFeedback({
+              type: 'success',
+              message: `✅ Boleta ${batchFolio} eliminada exitosamente del sistema.`
+            });
+            setTimeout(() => setSyncFeedback(null), 4000);
+          }
+        } catch (err: any) {
+          console.error('Error deleting batch:', err);
+          setSyncFeedback({
+            type: 'warning',
+            message: `Error al eliminar boleta: ${err.message}`
+          });
+          setTimeout(() => setSyncFeedback(null), 6000);
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
+  };
+
+  // Prompt confirmation modal before clearing offline queue
+  const handleClearOfflineQueuePrompt = () => {
+    if (offlineBatches.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Vaciar Cola de Boletas Sin Conexión?',
+      description: (
+        <div className="space-y-2">
+          <p>
+            Se eliminarán las <strong>{offlineBatches.length} boleta(s)</strong> pendientes almacenadas en este dispositivo que no hayan sido transmitidas al servidor central.
+          </p>
+          <p className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
+            Esta acción es irreversible y podría causar discrepancias con los productores si ya se les entregó un ticket físico.
+          </p>
+        </div>
+      ),
+      variant: 'danger',
+      icon: <Trash2 size={24} className="text-rose-600" />,
+      confirmText: 'Sí, Vaciar Cola Local',
+      confirmInputRequired: 'VACIAR',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          localStorage.removeItem('jbm_offline_reception_queue');
+          refreshOfflineQueue();
+          await refreshMetrics();
+          setSyncFeedback({
+            type: 'info',
+            message: 'Cola local de boletas offline vaciada correctamente.'
+          });
+          setTimeout(() => setSyncFeedback(null), 4000);
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
   };
 
   // Quick Create Producer
@@ -914,7 +1134,7 @@ export function Reception() {
                       </div>
                     </td>
 
-                    {/* Actions / View Ticket Button & Sync */}
+                    {/* Actions / View Ticket Button, Sync & Delete */}
                     <td className="px-5 py-3.5 text-center">
                       <div className="inline-flex items-center gap-1.5 justify-center">
                         <button
@@ -934,6 +1154,13 @@ export function Reception() {
                             <CloudUpload size={14} />
                           </button>
                         )}
+                        <button
+                          onClick={() => handleDeleteBatchPrompt(batch)}
+                          className="p-1.5 bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-400 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer group"
+                          title="Eliminar boleta de recepción"
+                        >
+                          <Trash2 size={14} className="group-hover:scale-110 transition-transform" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -977,7 +1204,7 @@ export function Reception() {
             {/* Modal Body: Split Screen (Left: Form | Right: Live Thermal Ticket Preview) */}
             <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 bg-slate-50">
               {/* LEFT COLUMN: ENTRY FORM (7 cols) */}
-              <form onSubmit={handleSubmit} className="lg:col-span-7 space-y-4">
+              <form onSubmit={(e) => promptFinalizeWeighIn(e, false)} className="lg:col-span-7 space-y-4">
                 {/* Offline Warning Notice if currently disconnected */}
                 {effectiveIsOffline && (
                   <div className="p-3.5 bg-amber-100 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 text-amber-950 shadow-xs">
@@ -1413,7 +1640,7 @@ export function Reception() {
                 <div className="pt-2 flex flex-col sm:flex-row gap-3">
                   <button
                     type="button"
-                    onClick={(e) => handleSubmit(e, true)}
+                    onClick={(e) => promptFinalizeWeighIn(e, true)}
                     className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
                   >
                     <Printer size={18} className="text-amber-400" />
@@ -1421,7 +1648,8 @@ export function Reception() {
                   </button>
 
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={(e) => promptFinalizeWeighIn(e, false)}
                     className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
                   >
                     <CheckCircle2 size={18} />
@@ -1457,30 +1685,16 @@ export function Reception() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: VER / IMPRIMIR TICKET EXISTENTE                                     */}
+      {/* MODAL: VER / IMPRIMIR TICKET EXISTENTE (FORMATO TÉRMICO 80MM)              */}
       {/* ========================================================================= */}
       {selectedTicket && (
-        <div id="print-modal-container" className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-900 text-white no-print">
-              <div className="flex items-center gap-2">
-                <Printer size={18} className="text-emerald-400" />
-                <h3 className="font-bold text-sm text-white">
-                  Ticket #{selectedTicket.folio || selectedTicket.id}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedTicket(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-6 bg-slate-100 flex flex-col items-center justify-center overflow-y-auto max-h-[80vh]">
-              <ThermalTicket
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+          <div className="bg-slate-900 rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden border border-slate-800 flex flex-col max-h-[95vh]">
+            <div className="p-4 sm:p-6 bg-slate-950 overflow-y-auto flex flex-col items-center">
+              <ThermalReceiptPreview
                 data={{
                   folio: selectedTicket.folio || `#REC-${String(selectedTicket.id).padStart(5, '0')}`,
+                  scale_ticket_folio: selectedTicket.scale_ticket_folio || selectedTicket.folio || `#REC-${String(selectedTicket.id).padStart(5, '0')}`,
                   date: selectedTicket.date,
                   producer_name: selectedTicket.producer_name,
                   origin: selectedTicket.origin,
@@ -1493,12 +1707,18 @@ export function Reception() {
                   price_per_kg: selectedTicket.price_per_kg,
                   subtotal: selectedTicket.subtotal,
                   scale_fee: selectedTicket.scale_fee,
+                  scale_fee_payment: selectedTicket.scale_fee_payment,
+                  extra_charge_per_kg: selectedTicket.extra_charge_per_kg,
+                  extra_charge_total: selectedTicket.extra_charge_total,
+                  extra_charge_concept: selectedTicket.extra_charge_concept,
                   total: selectedTicket.total,
                   operator: selectedTicket.operator,
                   notes: selectedTicket.notes
                 }}
-                showActions={true}
+                isOpen={true}
+                onClose={() => setSelectedTicket(null)}
                 onPrint={() => window.print()}
+                showToolbar={true}
               />
             </div>
           </div>
@@ -1750,7 +1970,19 @@ export function Reception() {
             </div>
 
             {/* Footer */}
-            <div className="flex justify-end pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              {offlineBatches.length > 0 ? (
+                <button
+                  onClick={handleClearOfflineQueuePrompt}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200 cursor-pointer transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 size={13} />
+                  <span>Vaciar Cola Offline ({offlineBatches.length})</span>
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-400 font-mono">IndexedDB JBM v1.0 Activo</span>
+              )}
+
               <button
                 onClick={() => setShowStorageModal(false)}
                 className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
@@ -1761,6 +1993,24 @@ export function Reception() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* REUSABLE CONFIRMATION MODAL (FINALIZING TICKETS, DELETING RECORDS, ETC.)   */}
+      {/* ========================================================================= */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        variant={confirmModal.variant}
+        icon={confirmModal.icon}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        summaryItems={confirmModal.summaryItems}
+        confirmInputRequired={confirmModal.confirmInputRequired}
+        isLoading={confirmModal.isLoading}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

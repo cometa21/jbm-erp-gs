@@ -26,9 +26,11 @@ import {
   RefreshCw,
   ExternalLink,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from 'lucide-react';
 import type { Settlement, Producer, Batch } from '../types';
+import { ConfirmationModal, type SummaryItem, type ConfirmationVariant } from './ConfirmationModal';
 import { Logo } from './Logo';
 import {
   exportSettlementsReport,
@@ -68,6 +70,26 @@ export function Finances() {
     extra_charge_per_kg: '0.40',
     payment_method: 'Transferencia' as 'Transferencia' | 'Cheque' | 'Efectivo',
     notes: ''
+  });
+
+  // Reusable Confirmation Modal State
+  const [confirmModal, setConfirmModal] = React.useState<{
+    isOpen: boolean;
+    title: string;
+    description?: React.ReactNode;
+    variant?: ConfirmationVariant;
+    icon?: React.ReactNode;
+    confirmText?: string;
+    cancelText?: string;
+    summaryItems?: SummaryItem[];
+    confirmInputRequired?: string;
+    onConfirm: () => Promise<void> | void;
+    isLoading?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    onConfirm: () => {},
+    variant: 'warning'
   });
 
   // Load Data
@@ -130,21 +152,84 @@ export function Finances() {
   const handleExport = (type: 'settlements' | 'producers' | 'operations', format: 'csv' | 'excel') => {
     if (type === 'settlements') {
       exportSettlementsReport(filteredSettlements, format, `${selectedProducerId === 'todos' ? 'Todos los productores' : 'Productor filtrado'}`);
-      setExportFeedback(`Reporte de Liquidaciones exportado exitosamente en formato ${format.toUpperCase()}.`);
+      setExportFeedback(`Reporte de Liquidaciones (${filteredSettlements.length} registros) exportado en formato ${format.toUpperCase()} compatible con CONTPAQi/ERP.`);
     } else if (type === 'producers') {
       exportProducerLedgerReport(producers, settlements, format);
-      setExportFeedback(`Auxiliar Contable de Productores exportado exitosamente en formato ${format.toUpperCase()}.`);
+      setExportFeedback(`Auxiliar Contable de Productores (${producers.length} cuentas) exportado en formato ${format.toUpperCase()} para software contable.`);
     } else if (type === 'operations') {
       exportOperationsCostReport(batches, format);
-      setExportFeedback(`Reporte de Costos Operativos y Maniobra exportado exitosamente en formato ${format.toUpperCase()}.`);
+      setExportFeedback(`Auditoría de Maniobra y Báscula (${batches.length} entradas) exportada en formato ${format.toUpperCase()} para conciliación.`);
     }
-    setTimeout(() => setExportFeedback(null), 5000);
+    setTimeout(() => setExportFeedback(null), 5500);
     setShowExportModal(false);
   };
 
-  // Submit New Settlement
-  const handleCreateSettlement = async (e: React.FormEvent) => {
+  // Export current table view directly based on active tab
+  const exportCurrentTableView = (format: 'csv' | 'excel' = 'csv') => {
+    handleExport(activeTab, format);
+  };
+
+  // Prompt modal before creating a new settlement
+  const promptCreateSettlement = (e: React.FormEvent) => {
     e.preventDefault();
+    const kg = parseFloat(newSettlementForm.total_kg) || 0;
+    const pKg = parseFloat(newSettlementForm.price_per_kg) || 18.50;
+    const subtotal = Number((kg * pKg).toFixed(2));
+    const extraKg = parseFloat(newSettlementForm.extra_charge_per_kg) || 0.40;
+    const deductions = Number((kg * extraKg).toFixed(2));
+    const scaleFees = parseFloat(newSettlementForm.scale_fees) || 50.00;
+    const totalPaid = Number(Math.max(0, subtotal - deductions - scaleFees).toFixed(2));
+
+    const selectedProducer = producers.find(p => p.id === parseInt(newSettlementForm.producer_id));
+    const producerName = selectedProducer ? selectedProducer.name : 'Productor Seleccionado';
+
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Autorizar y Aplicar Liquidación Financiera?',
+      description: (
+        <div className="space-y-2">
+          <p>
+            Se generará una póliza contable definitiva y se registrará el desembolso a favor del productor.
+          </p>
+          <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200 font-medium">
+            Verifique que los kilogramos y deducciones coincidan con las boletas de báscula liquidadas.
+          </p>
+        </div>
+      ),
+      variant: 'emerald',
+      icon: <DollarSign size={24} className="text-emerald-700" />,
+      confirmText: 'Autorizar y Registrar Póliza',
+      cancelText: 'Volver al Formulario',
+      summaryItems: [
+        { label: 'Productor Beneficiario', value: producerName },
+        { label: 'RFC', value: selectedProducer?.rfc || 'No especificado' },
+        { label: 'Kilos Totales Fruta', value: `${kg.toLocaleString('es-MX', { minimumFractionDigits: 2 })} kg` },
+        { label: 'Precio Liquidado', value: `$${pKg.toFixed(2)} / kg` },
+        { label: 'Subtotal Bruto', value: `$${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+        { label: 'Deducciones (Maniobra)', value: `-$${deductions.toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+        { label: 'Cuota de Báscula', value: `-$${scaleFees.toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+        { 
+          label: 'IMPORTE TOTAL A DISPERSAR', 
+          value: `$${totalPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`,
+          highlighted: true,
+          badge: newSettlementForm.payment_method.toUpperCase(),
+          badgeColor: 'bg-emerald-100 text-emerald-950 font-bold'
+        },
+        { label: 'Método de Pago', value: newSettlementForm.payment_method }
+      ],
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          await executeCreateSettlement();
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
+  };
+
+  // Execute Settlement Creation
+  const executeCreateSettlement = async () => {
     const kg = parseFloat(newSettlementForm.total_kg) || 0;
     const pKg = parseFloat(newSettlementForm.price_per_kg) || 18.50;
     const subtotal = Number((kg * pKg).toFixed(2));
@@ -188,8 +273,106 @@ export function Finances() {
         notes: ''
       });
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      setExportFeedback('Error al registrar liquidación: ' + err.message);
+      setTimeout(() => setExportFeedback(null), 6000);
     }
+  };
+
+  // Prompt delete settlement
+  const handleDeleteSettlementPrompt = (settlement: Settlement) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar y Cancelar Liquidación Contable?',
+      description: (
+        <div className="space-y-2">
+          <p>
+            Esta acción eliminará el registro contable de liquidación permanentemente de los libros de la empresa.
+          </p>
+          <p className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
+            ⚠️ Asegúrese de que no se haya realizado la dispersión bancaria SPEI o que el cheque haya sido cancelado en tesorería.
+          </p>
+        </div>
+      ),
+      variant: 'danger',
+      icon: <Trash2 size={24} className="text-rose-600" />,
+      confirmText: 'Eliminar Liquidación',
+      cancelText: 'Cancelar',
+      summaryItems: [
+        { label: 'Folio Liquidación', value: settlement.folio },
+        { label: 'Productor', value: settlement.producer_name || 'Sin Asignar' },
+        { label: 'Kilos Fruta', value: `${(settlement.total_kg || 0).toLocaleString()} kg` },
+        { 
+          label: 'Importe Liquidado', 
+          value: `$${(settlement.total_paid || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`,
+          highlighted: true 
+        },
+        { label: 'Fecha de Emisión', value: settlement.date ? new Date(settlement.date).toLocaleDateString('es-MX') : 'Hoy' }
+      ],
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          const res = await fetch(`/api/settlements/${settlement.id}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'Error al eliminar');
+          }
+          fetchData();
+          setExportFeedback(`🗑️ Liquidación ${settlement.folio} eliminada correctamente.`);
+          setTimeout(() => setExportFeedback(null), 5000);
+        } catch (err: any) {
+          setExportFeedback(`Error eliminando liquidación: ${err.message}`);
+          setTimeout(() => setExportFeedback(null), 6000);
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
+  };
+
+  // Prompt delete producer
+  const handleDeleteProducerPrompt = (producer: Producer) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar Productor del Directorio?',
+      description: (
+        <div className="space-y-2">
+          <p>
+            Se eliminará la ficha del productor <strong>{producer.name}</strong> del padrón general.
+          </p>
+          <p className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
+            Nota: Solo es posible eliminar productores que no cuenten con boletas de báscula o liquidaciones históricas asociadas.
+          </p>
+        </div>
+      ),
+      variant: 'danger',
+      icon: <Trash2 size={24} className="text-rose-600" />,
+      confirmText: 'Eliminar Productor',
+      cancelText: 'Cancelar',
+      summaryItems: [
+        { label: 'Nombre Productor', value: producer.name },
+        { label: 'RFC', value: producer.rfc || 'No especificado' },
+        { label: 'Ubicación / Huerto', value: producer.location || producer.default_orchard || 'Pedernales, Ver.' },
+        { label: 'Saldo Registrado', value: `$${(producer.balance || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` }
+      ],
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isLoading: true }));
+        try {
+          const res = await fetch(`/api/producers/${producer.id}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'Error al eliminar');
+          }
+          fetchData();
+          setExportFeedback(`🗑️ Productor ${producer.name} eliminado.`);
+          setTimeout(() => setExportFeedback(null), 5000);
+        } catch (err: any) {
+          setExportFeedback(`No se pudo eliminar el productor: ${err.message}`);
+          setTimeout(() => setExportFeedback(null), 6000);
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false, isLoading: false }));
+        }
+      }
+    });
   };
 
   return (
@@ -220,30 +403,31 @@ export function Finances() {
 
         {/* Header Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-          {/* Quick Export to Excel */}
+          {/* Quick Export to CSV (Accounting ERP) */}
           <button
-            onClick={() => handleExport('settlements', 'excel')}
-            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-            title="Descargar reporte actual en formato Excel (.XLS)"
+            onClick={() => exportCurrentTableView('csv')}
+            className="bg-emerald-800 hover:bg-emerald-900 text-white border border-emerald-700 px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-xs hover:shadow-md transition-all cursor-pointer group"
+            title="Exportar la vista actual de la tabla a formato CSV estándar (Compatible con CONTPAQi, Aspel COI, SAP y ERPs contables)"
           >
-            <FileSpreadsheet size={16} className="text-emerald-700" />
-            <span>Exportar Excel</span>
+            <Table size={16} className="text-emerald-300 group-hover:scale-110 transition-transform" />
+            <span>Exportar Vista Actual (CSV)</span>
           </button>
 
-          {/* Quick Export to CSV */}
+          {/* Quick Export to Excel */}
           <button
-            onClick={() => handleExport('settlements', 'csv')}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-            title="Descargar datos en formato CSV estándar compatible con CONTPAQi / SAT"
+            onClick={() => exportCurrentTableView('excel')}
+            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            title="Descargar reporte de la tabla actual en formato Microsoft Excel (.XLS)"
           >
-            <Table size={16} className="text-slate-600" />
-            <span>Exportar CSV</span>
+            <FileSpreadsheet size={16} className="text-emerald-700" />
+            <span>Excel</span>
           </button>
 
           {/* Advanced Export Center Button */}
           <button
             onClick={() => setShowExportModal(true)}
             className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            title="Abrir asistente de reportes contables y fiscales avanzados"
           >
             <Download size={16} />
             <span>Centro de Reportes</span>
@@ -252,7 +436,7 @@ export function Finances() {
           {/* New Settlement Button */}
           <button
             onClick={() => setShowNewSettlementModal(true)}
-            className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-emerald-900/20 hover:scale-[1.02] transition-all cursor-pointer"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-emerald-900/20 hover:scale-[1.02] transition-all cursor-pointer"
           >
             <Plus size={16} />
             <span>Nueva Liquidación</span>
@@ -426,6 +610,16 @@ export function Finances() {
                 <option value="hoy">Hoy</option>
                 <option value="semana">Últimos 7 días</option>
               </select>
+
+              {/* Direct CSV Export for Current Filtered Settlements */}
+              <button
+                onClick={() => handleExport('settlements', 'csv')}
+                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Exportar la lista filtrada de liquidaciones a CSV (Compatible con CONTPAQi / Software Contable)"
+              >
+                <Table size={14} className="text-emerald-700" />
+                <span>CSV Contable</span>
+              </button>
             </div>
           </div>
 
@@ -507,6 +701,13 @@ export function Finances() {
                           >
                             <FileSpreadsheet size={14} />
                           </button>
+                          <button
+                            onClick={() => handleDeleteSettlementPrompt(s)}
+                            className="p-1.5 bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-400 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer group"
+                            title="Eliminar y Cancelar Liquidación"
+                          >
+                            <Trash2 size={14} className="group-hover:scale-110 transition-transform" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -551,18 +752,20 @@ export function Finances() {
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleExport('producers', 'excel')}
+                onClick={() => handleExport('producers', 'csv')}
                 className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Exportar auxiliar contable de productores a CSV para ERP / CONTPAQi"
               >
-                <FileSpreadsheet size={15} />
-                <span>Exportar Auxiliar (Excel)</span>
+                <Table size={15} className="text-emerald-700" />
+                <span>Exportar CSV Contable</span>
               </button>
               <button
-                onClick={() => handleExport('producers', 'csv')}
+                onClick={() => handleExport('producers', 'excel')}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Descargar libro auxiliar en formato Excel"
               >
-                <Table size={15} />
-                <span>CSV</span>
+                <FileSpreadsheet size={15} className="text-slate-600" />
+                <span>Excel</span>
               </button>
             </div>
           </div>
@@ -611,15 +814,24 @@ export function Finances() {
                         </span>
                       </td>
                       <td className="p-4 text-center font-sans">
-                        <button
-                          onClick={() => {
-                            setSelectedProducerId(String(p.id));
-                            setActiveTab('settlements');
-                          }}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                        >
-                          Ver Cortes
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setSelectedProducerId(String(p.id));
+                              setActiveTab('settlements');
+                            }}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          >
+                            Ver Cortes
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProducerPrompt(p)}
+                            className="p-1.5 bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-400 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer group"
+                            title="Eliminar Productor"
+                          >
+                            <Trash2 size={13} className="group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -646,18 +858,20 @@ export function Finances() {
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleExport('operations', 'excel')}
+                onClick={() => handleExport('operations', 'csv')}
                 className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Exportar auditoría de maniobra y pesaje a CSV para conciliación contable"
               >
-                <FileSpreadsheet size={15} />
-                <span>Exportar Auditoría (Excel)</span>
+                <Table size={15} className="text-emerald-700" />
+                <span>Exportar CSV Contable</span>
               </button>
               <button
-                onClick={() => handleExport('operations', 'csv')}
+                onClick={() => handleExport('operations', 'excel')}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Descargar auditoría en formato Excel"
               >
-                <Table size={15} />
-                <span>CSV</span>
+                <FileSpreadsheet size={15} className="text-slate-600" />
+                <span>Excel</span>
               </button>
             </div>
           </div>
@@ -1002,7 +1216,7 @@ export function Finances() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateSettlement} className="space-y-4 text-xs">
+            <form onSubmit={promptCreateSettlement} className="space-y-4 text-xs">
               {/* Producer Select */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Productor *</label>
@@ -1132,6 +1346,23 @@ export function Finances() {
           </div>
         </div>
       )}
+      {/* ========================================================================= */}
+      {/* REUSABLE CONFIRMATION MODAL (FINALIZING SETTLEMENTS, DELETING RECORDS)   */}
+      {/* ========================================================================= */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        variant={confirmModal.variant}
+        icon={confirmModal.icon}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        summaryItems={confirmModal.summaryItems}
+        confirmInputRequired={confirmModal.confirmInputRequired}
+        isLoading={confirmModal.isLoading}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

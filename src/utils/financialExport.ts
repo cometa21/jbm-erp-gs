@@ -538,3 +538,111 @@ export function exportSingleSettlementVoucher(
     exportToExcelXML(filename, 'Póliza Contable', headersExcel, rows, title, summaryRows);
   }
 }
+
+/**
+ * Report 5: Shipments & Freight / Logistics Report (Carta Porte Digital 3.0)
+ */
+export interface ShipmentData {
+  id: string;
+  dest: string;
+  carrier: string;
+  driver: string;
+  boxes: string;
+  boxesCount?: number;
+  weightTon?: number;
+  status: string;
+  temp: string;
+  eta: string;
+  plates?: string;
+  cfdiCartaPorte?: string;
+  sealNumber?: string;
+  departureDate?: string;
+  freightCost?: number;
+}
+
+export function exportShipmentsReport(
+  shipments: ShipmentData[],
+  format: 'csv' | 'excel' = 'csv',
+  filterTitle: string = 'Todos los Embarques'
+) {
+  const filename = `Embarques_CartaPorte_JBM_${new Date().toISOString().slice(0, 10)}`;
+  const title = `Reporte de Embarques y Despacho Logístico (${filterTitle})`;
+
+  const headersCSV = [
+    'Folio Embarque',
+    'Carta Porte CFDI',
+    'Fecha Despacho',
+    'Destino / Cliente',
+    'Transportista',
+    'Operador',
+    'Placas Unidad',
+    'Sello Fiscal / Candado',
+    'Cajas',
+    'Peso Neto (Ton)',
+    'Temperatura (°C)',
+    'ETA Estimado',
+    'Costo Flete ($)',
+    'Estado Embarque'
+  ];
+
+  const headersExcel: { label: string; type: 'String' | 'Number'; width?: number }[] = [
+    { label: 'Folio Emb.', type: 'String', width: 95 },
+    { label: 'Carta Porte', type: 'String', width: 120 },
+    { label: 'Fecha Despacho', type: 'String', width: 100 },
+    { label: 'Destino / Cliente', type: 'String', width: 240 },
+    { label: 'Línea Transportista', type: 'String', width: 180 },
+    { label: 'Operador', type: 'String', width: 150 },
+    { label: 'Placas', type: 'String', width: 90 },
+    { label: 'Sello / Candado', type: 'String', width: 110 },
+    { label: 'Cajas', type: 'Number', width: 80 },
+    { label: 'Peso (Ton)', type: 'Number', width: 90 },
+    { label: 'Temp (°C)', type: 'String', width: 80 },
+    { label: 'ETA', type: 'String', width: 130 },
+    { label: 'Costo Flete ($)', type: 'Number', width: 110 },
+    { label: 'Estado', type: 'String', width: 120 }
+  ];
+
+  const rows = shipments.map(s => {
+    const boxesNum = s.boxesCount || parseInt(s.boxes.replace(/[^\d]/g, '')) || 0;
+    const tonNum = s.weightTon || parseFloat(s.boxes.match(/([\d.]+)\s*Ton/i)?.[1] || '0');
+    const fCost = s.freightCost || 18500;
+
+    return [
+      s.id,
+      s.cfdiCartaPorte || `CP-30-${s.id.slice(-3)}`,
+      s.departureDate || new Date().toISOString().slice(0, 10),
+      s.dest,
+      s.carrier,
+      s.driver,
+      s.plates || '98-AK-2L / CA-552',
+      s.sealNumber || 'MX-SAT-884920',
+      boxesNum,
+      tonNum,
+      s.temp,
+      s.eta,
+      fCost,
+      s.status
+    ];
+  });
+
+  const totalBoxes = rows.reduce((sum, r) => sum + (Number(r[8]) || 0), 0);
+  const totalTon = rows.reduce((sum, r) => sum + (Number(r[9]) || 0), 0);
+  const totalFreight = rows.reduce((sum, r) => sum + (Number(r[12]) || 0), 0);
+
+  if (format === 'csv') {
+    const csvRowsWithTotals = [
+      ...rows,
+      ['---', '---', '', 'TOTALES LOGÍSTICA', '', '', '', '', totalBoxes, Number(totalTon.toFixed(2)), '---', '---', totalFreight, `${shipments.length} embarques`]
+    ];
+    exportToCSV(filename, headersCSV, csvRowsWithTotals as any, title);
+  } else {
+    const summaryRows = [
+      {
+        label: 'TOTALES',
+        values: ['TOTALES', '', '', `${shipments.length} embarques`, '', '', '', '', totalBoxes, Number(totalTon.toFixed(2)), '', '', totalFreight, '']
+      }
+    ];
+    exportToExcelXML(filename, 'Embarques Logística', headersExcel, rows, title, summaryRows);
+  }
+}
+

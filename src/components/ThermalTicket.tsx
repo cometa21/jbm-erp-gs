@@ -3,6 +3,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Printer, Download, Share2, Copy, Check, Eye } from 'lucide-react';
 import { Logo } from './Logo';
 
+export { ThermalReceiptPreview, type WeighInReceiptData } from './ThermalReceiptPreview';
+
 export interface TicketData {
   folio?: string;
   scale_ticket_folio?: string;

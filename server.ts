@@ -129,6 +129,56 @@ db.exec(`
     notes TEXT,
     FOREIGN KEY(batch_id) REFERENCES batches(id)
   );
+
+  CREATE TABLE IF NOT EXISTS pallets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pallet_number TEXT UNIQUE NOT NULL,
+    batch_id INTEGER NOT NULL,
+    calibre TEXT NOT NULL,
+    color TEXT NOT NULL,
+    quality TEXT NOT NULL DEFAULT 'primera',
+    presentation_name TEXT DEFAULT 'Caja JBM Export 18.14 kg',
+    boxes_count INTEGER NOT NULL DEFAULT 54,
+    weight_kg REAL NOT NULL,
+    location_zone TEXT DEFAULT 'A1',
+    status TEXT DEFAULT 'en_camara',
+    packed_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    operator TEXT DEFAULT 'Carlos Barragán',
+    treatment TEXT DEFAULT 'Cera Carnauba Grado Alimento + Tiabendazol',
+    notes TEXT,
+    FOREIGN KEY(batch_id) REFERENCES batches(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS shipments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    folio TEXT UNIQUE NOT NULL,
+    destination TEXT NOT NULL,
+    client_name TEXT,
+    carrier_name TEXT NOT NULL,
+    driver_name TEXT NOT NULL,
+    driver_license TEXT,
+    plates_truck TEXT NOT NULL,
+    plates_trailer TEXT,
+    thermograph_id TEXT,
+    seal_number TEXT,
+    total_pallets INTEGER DEFAULT 0,
+    total_boxes INTEGER DEFAULT 0,
+    total_kg REAL DEFAULT 0,
+    status TEXT DEFAULT 'preparando',
+    departure_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    eta TEXT,
+    temp_celsius REAL DEFAULT 4.0,
+    operator TEXT DEFAULT 'Carlos Barragán',
+    notes TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS shipment_pallets (
+    shipment_id INTEGER NOT NULL,
+    pallet_id INTEGER NOT NULL,
+    PRIMARY KEY(shipment_id, pallet_id),
+    FOREIGN KEY(shipment_id) REFERENCES shipments(id),
+    FOREIGN KEY(pallet_id) REFERENCES pallets(id)
+  );
 `);
 
 // Migration helper for SQLite existing tables
@@ -312,6 +362,73 @@ if (discardCount.count === 0) {
   insertDiscard.run(1, 'Partidura de Uña / Golpe de Cosecha', 180, 1.7, 'Estable', '2026-08-24 11:30:00', 'Manejo en campo');
   insertDiscard.run(1, 'Sobremaduro / Fruta Amarilla no Industrial', 140, 1.3, 'Baja', '2026-08-24 12:00:00', 'Corte tardío');
   insertDiscard.run(2, 'Roña / Mancha Grasosa (Clasif. B)', 290, 2.2, 'Alza', '2026-08-24 09:00:00', 'Revisar huerto origen');
+}
+
+// Seed pallets if empty
+const palletCount = db.prepare("SELECT COUNT(*) as count FROM pallets").get() as { count: number };
+if (palletCount.count === 0) {
+  const insertPallet = db.prepare(`
+    INSERT INTO pallets (pallet_number, batch_id, calibre, color, quality, presentation_name, boxes_count, weight_kg, location_zone, status, packed_date, operator, treatment, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertPallet.run('PLT-2026-001', 1, 'V-XX', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'A1', 'en_camara', '2026-08-24 11:45:00', 'Carlos Barragán', 'Cera Carnauba Grado Alimento + Tiabendazol', 'Pallet calidad exportación USDA');
+  insertPallet.run('PLT-2026-002', 1, 'V-XX', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'A1', 'en_camara', '2026-08-24 11:55:00', 'Carlos Barragán', 'Cera Carnauba Grado Alimento + Tiabendazol', 'Pallet calidad exportación USDA');
+  insertPallet.run('PLT-2026-003', 1, 'V-X', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'A2', 'en_camara', '2026-08-24 12:30:00', 'Carlos Barragán', 'Cera Carnauba Grado Alimento + Tiabendazol', 'Tarima lista para McAllen');
+  insertPallet.run('PLT-2026-004', 2, 'V-XXX', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'B1', 'en_camara', '2026-08-24 09:30:00', 'Arturo Mendoza', 'Cera Carnauba Grado Alimento', 'Fruta extra turgente Rancho San José');
+  insertPallet.run('PLT-2026-005', 1, 'AL-XX', 'alimonado', 'segunda', 'Caja Nacional 20 kg', 60, 1200.00, 'B2', 'en_camara', '2026-08-24 13:15:00', 'Carlos Barragán', 'Tratamiento estándar', 'Destinado a Central de Abasto');
+  insertPallet.run('PLT-2026-006', 2, 'V-5', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'C1', 'en_camara', '2026-08-23 15:00:00', 'Arturo Mendoza', 'Cera Carnauba Grado Alimento', 'Ingreso hace 2 días');
+  insertPallet.run('PLT-2026-007', 3, 'V-4', 'verde', 'primera', 'Caja JBM Export 18.14 kg (40 lbs)', 54, 979.56, 'C1', 'en_camara', '2026-08-22 17:00:00', 'Carlos Barragán', 'Cera Carnauba Grado Alimento', 'Prioridad FIFO salida');
+}
+
+// Seed shipments if empty
+const shipmentCount = db.prepare("SELECT COUNT(*) as count FROM shipments").get() as { count: number };
+if (shipmentCount.count === 0) {
+  const insertShipment = db.prepare(`
+    INSERT INTO shipments (folio, destination, client_name, carrier_name, driver_name, driver_license, plates_truck, plates_trailer, thermograph_id, seal_number, total_pallets, total_boxes, total_kg, status, departure_date, eta, temp_celsius, operator, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertShipment.run(
+    'EMB-2026-084',
+    'McAllen, TX, USA (Aduana Reynosa)',
+    'Texas Fresh Citrus LLC',
+    'Transportes Refrigerados del Golfo S.A.',
+    'Roberto Morales',
+    'LIC-FED-849201',
+    '52-AE-9K',
+    'REM-44-TX',
+    'TG-9941-SENSITECH',
+    'SEAL-JBM-88410',
+    20,
+    1080,
+    19591.20,
+    'en_transito',
+    '2026-08-24 06:00:00',
+    '2026-08-25 06:00 hrs',
+    3.8,
+    'Carlos Barragán',
+    'Carta Porte Digital 3.0 timbrada con CFDI Ingreso'
+  );
+  insertShipment.run(
+    'EMB-2026-085',
+    'Central de Abasto CDMX (Bodega I-42)',
+    'Frutas y Legumbres Barragán Hnos.',
+    'Fletes Barragán Express',
+    'Héctor Salgado',
+    'LIC-FED-910412',
+    '88-BB-2M',
+    'REM-91-DF',
+    'TG-8812-DELTA',
+    'SEAL-JBM-88411',
+    16,
+    960,
+    19200.00,
+    'preparando',
+    '2026-08-24 16:30:00',
+    '2026-08-24 23:30 hrs',
+    4.1,
+    'Carlos Barragán',
+    'En proceso de carga y verificación en andén'
+  );
 }
 
 async function startServer() {
@@ -602,6 +719,22 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/producers/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      // Check if producer has batches
+      const hasBatches = db.prepare("SELECT COUNT(*) as count FROM batches WHERE producer_id = ?").get(id) as { count: number };
+      if (hasBatches && hasBatches.count > 0) {
+        return res.status(400).json({ error: `No se puede eliminar: El productor tiene ${hasBatches.count} boletas de báscula asociadas.` });
+      }
+      db.prepare("DELETE FROM producers WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/producers/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Batches / Fruit Reception
   app.get("/api/batches", (req, res) => {
     try {
@@ -720,6 +853,27 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/batches/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const batch = db.prepare("SELECT * FROM batches WHERE id = ?").get(id) as any;
+      if (!batch) {
+        return res.status(404).json({ error: "Boleta no encontrada" });
+      }
+      // If batch is tied to producer balance, adjust
+      if (batch.producer_id && batch.total) {
+        db.prepare("UPDATE producers SET balance = MAX(0, balance - ?) WHERE id = ?").run(batch.total, batch.producer_id);
+      }
+      // Also delete any production runs linked to this batch or disassociate
+      db.prepare("DELETE FROM production_runs WHERE batch_id = ?").run(id);
+      db.prepare("DELETE FROM batches WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id, folio: batch.folio });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/batches/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Settlements / Liquidaciones
   app.get("/api/settlements", (req, res) => {
     try {
@@ -754,6 +908,21 @@ async function startServer() {
       res.json({ id: result.lastInsertRowid, folio });
     } catch (err: any) {
       console.error("Error in POST /api/settlements:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/settlements/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const settlement = db.prepare("SELECT * FROM settlements WHERE id = ?").get(id) as any;
+      if (!settlement) {
+        return res.status(404).json({ error: "Liquidación no encontrada" });
+      }
+      db.prepare("DELETE FROM settlements WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id, folio: settlement.folio });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/settlements/:id:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -996,6 +1165,36 @@ async function startServer() {
       res.json({ id: result.lastInsertRowid, type, kg });
     } catch (err: any) {
       console.error("Error in POST /api/production/discards:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/production/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const run = db.prepare("SELECT * FROM production_runs WHERE id = ?").get(id) as any;
+      if (!run) {
+        return res.status(404).json({ error: "Registro de corrida no encontrado" });
+      }
+      db.prepare("DELETE FROM production_runs WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/production/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/production/discards/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const discard = db.prepare("SELECT * FROM production_discards WHERE id = ?").get(id) as any;
+      if (!discard) {
+        return res.status(404).json({ error: "Registro de descarte no encontrado" });
+      }
+      db.prepare("DELETE FROM production_discards WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/production/discards/:id:", err);
       res.status(500).json({ error: err.message });
     }
   });
