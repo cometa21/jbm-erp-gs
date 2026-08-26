@@ -6,6 +6,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
+import { TopNavbar } from './components/TopNavbar';
 import { Dashboard } from './components/Dashboard';
 import { Reception } from './components/Reception';
 import { ColdStorage } from './components/ColdStorage';
@@ -22,23 +23,27 @@ export default function App() {
     <Router>
       <div className="flex min-h-screen bg-slate-50">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/recepcion" element={<Reception />} />
-            <Route path="/produccion" element={<Production />} />
-            <Route path="/camara" element={<ColdStorage />} />
-            <Route path="/ventas" element={<POS />} />
-            <Route path="/logistica" element={<Logistics />} />
-            <Route path="/finanzas" element={<Finances />} />
-            <Route path="/documentos" element={<Documents />} />
-            <Route path="/insumos" element={<Supplies />} />
-            <Route path="/config" element={<SettingsPage />} />
-          </Routes>
-        </main>
+        <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-hidden">
+          <TopNavbar />
+          <main className="flex-1 overflow-y-auto">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/recepcion" element={<Reception />} />
+              <Route path="/produccion" element={<Production />} />
+              <Route path="/camara" element={<ColdStorage />} />
+              <Route path="/ventas" element={<POS />} />
+              <Route path="/logistica" element={<Logistics />} />
+              <Route path="/finanzas" element={<Finances />} />
+              <Route path="/documentos" element={<Documents />} />
+              <Route path="/insumos" element={<Supplies />} />
+              <Route path="/config" element={<SettingsPage />} />
+            </Routes>
+          </main>
+        </div>
       </div>
     </Router>
   );
 }
+
 
 

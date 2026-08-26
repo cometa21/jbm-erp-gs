@@ -38,6 +38,25 @@ const navItems = [
 
 export function Sidebar() {
   const [isOpen, setIsOpen] = React.useState(true);
+  const [criticalSuppliesCount, setCriticalSuppliesCount] = React.useState<number>(0);
+
+  React.useEffect(() => {
+    const checkCritical = () => {
+      fetch('/api/inventory')
+        .then(res => res.json())
+        .then((items: any[]) => {
+          if (Array.isArray(items)) {
+            const count = items.filter(i => i.quantity <= (i.critical_stock ?? (i.min_stock * 0.4))).length;
+            setCriticalSuppliesCount(count);
+          }
+        })
+        .catch(() => {});
+    };
+
+    checkCritical();
+    const interval = setInterval(checkCritical, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <aside 
@@ -76,35 +95,45 @@ export function Sidebar() {
 
       {/* Navigation List */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) => cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
-              isActive 
-                ? "bg-emerald-600 text-white font-bold shadow-md shadow-emerald-900/30" 
-                : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200 font-medium"
-            )}
-          >
-            <item.icon size={20} className={cn("shrink-0", isOpen ? "" : "mx-auto")} />
-            {isOpen && (
-              <div className="flex items-center justify-between w-full">
-                <span className="text-sm tracking-tight">{item.label}</span>
-                {item.badge && (
-                  <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-800/80 text-emerald-200 border border-emerald-500/30">
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-            )}
-            {!isOpen && (
-              <div className="absolute left-20 bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-xl border border-slate-700">
-                {item.label}
-              </div>
-            )}
-          </NavLink>
-        ))}
+        {navItems.map((item) => {
+          const isSupplies = item.path === '/insumos';
+          return (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) => cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                isActive 
+                  ? "bg-emerald-600 text-white font-bold shadow-md shadow-emerald-900/30" 
+                  : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200 font-medium"
+              )}
+            >
+              <item.icon size={20} className={cn("shrink-0", isOpen ? "" : "mx-auto")} />
+              {isOpen && (
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-sm tracking-tight">{item.label}</span>
+                  {isSupplies && criticalSuppliesCount > 0 ? (
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-600 text-white border border-rose-400 shadow-xs animate-pulse">
+                      🚨 {criticalSuppliesCount} Críticos
+                    </span>
+                  ) : item.badge ? (
+                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-800/80 text-emerald-200 border border-emerald-500/30">
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </div>
+              )}
+              {!isOpen && isSupplies && criticalSuppliesCount > 0 && (
+                <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping" />
+              )}
+              {!isOpen && (
+                <div className="absolute left-20 bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-xl border border-slate-700">
+                  {item.label} {isSupplies && criticalSuppliesCount > 0 ? `(${criticalSuppliesCount} críticos)` : ''}
+                </div>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {/* Quick Status / Operator info */}

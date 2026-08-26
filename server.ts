@@ -84,7 +84,26 @@ db.exec(`
     category TEXT DEFAULT 'Empaque',
     quantity INTEGER DEFAULT 0,
     unit TEXT,
-    min_stock INTEGER DEFAULT 100
+    min_stock INTEGER DEFAULT 100,
+    critical_stock INTEGER DEFAULT 50,
+    cost_unit REAL DEFAULT 0,
+    supplier TEXT DEFAULT 'Cartonera del Golfo S.A.',
+    sku TEXT DEFAULT '',
+    lead_time_days INTEGER DEFAULT 3,
+    last_restock_date TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS inventory_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER,
+    item_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    prev_qty INTEGER DEFAULT 0,
+    new_qty INTEGER DEFAULT 0,
+    reason TEXT DEFAULT '',
+    user TEXT DEFAULT 'Almacén',
+    date TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS sales (
@@ -187,7 +206,12 @@ function ensureColumn(tableName: string, columnName: string, columnDef: string) 
     const tableInfo = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
     const hasColumn = tableInfo.some(col => col.name.toLowerCase() === columnName.toLowerCase());
     if (!hasColumn) {
-      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef}`);
+      // SQLite ALTER TABLE ADD COLUMN cannot have non-constant defaults like CURRENT_TIMESTAMP
+      const sanitizedDef = columnDef.replace(/DEFAULT\s+CURRENT_TIMESTAMP/gi, "DEFAULT ''");
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${sanitizedDef}`);
+      if (/CURRENT_TIMESTAMP/i.test(columnDef)) {
+        db.exec(`UPDATE ${tableName} SET ${columnName} = datetime('now', 'localtime') WHERE ${columnName} IS NULL OR ${columnName} = ''`);
+      }
     }
   } catch (err) {
     console.error(`Migration error for ${tableName}.${columnName}:`, err);
@@ -248,6 +272,16 @@ ensureColumn("company_settings", "email", "TEXT DEFAULT 'contacto@jbmcitricos.co
 ensureColumn("company_settings", "portal_url", "TEXT DEFAULT 'https://portal.jbmcitricos.com'");
 ensureColumn("company_settings", "scale_fee", "REAL DEFAULT 50.00");
 ensureColumn("company_settings", "default_price_kg", "REAL DEFAULT 18.50");
+
+// Ensure all columns exist for inventory
+ensureColumn("inventory", "category", "TEXT DEFAULT 'Empaque'");
+ensureColumn("inventory", "min_stock", "INTEGER DEFAULT 100");
+ensureColumn("inventory", "critical_stock", "INTEGER DEFAULT 50");
+ensureColumn("inventory", "cost_unit", "REAL DEFAULT 0");
+ensureColumn("inventory", "supplier", "TEXT DEFAULT 'Cartonera del Golfo S.A.'");
+ensureColumn("inventory", "sku", "TEXT DEFAULT ''");
+ensureColumn("inventory", "lead_time_days", "INTEGER DEFAULT 3");
+ensureColumn("inventory", "last_restock_date", "TEXT DEFAULT CURRENT_TIMESTAMP");
 
 // Ensure all columns exist for sales
 ensureColumn("sales", "folio", "TEXT");
@@ -314,14 +348,51 @@ if (batchCount.count === 0) {
   insertBatch.run("REC-00105", 4, "2026-08-22 11:20:45", "Cosecha propia", "El Limonar 2", "Limón Mexicano", "Estándar", 16400.00, 4800.00, 11600.00, 18.50, 214600.00, 50.00, "descuento", 0.40, 4640.00, "Servicios operativos y maniobra", 209910.00, "completado", "Arturo Mendoza", "Excelente rendimiento de jugo");
 }
 
-// Seed inventory if empty
+// Seed inventory if empty or upgrade
 const invCount = db.prepare("SELECT COUNT(*) as count FROM inventory").get() as { count: number };
 if (invCount.count === 0) {
-  db.prepare("INSERT INTO inventory (item_name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?)").run("Caja Exportación 15kg JBM", "Empaque", 2400, "pzas", 500);
-  db.prepare("INSERT INTO inventory (item_name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?)").run("Pallet Madera Tratada HT 40x48", "Tarimas", 480, "pzas", 100);
-  db.prepare("INSERT INTO inventory (item_name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?)").run("Esquinero de Cartón 2.0m", "Protección", 1850, "pzas", 300);
-  db.prepare("INSERT INTO inventory (item_name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?)").run("Fleje Polipropileno 1/2 pulgada", "Sujeción", 45, "rollos", 10);
-  db.prepare("INSERT INTO inventory (item_name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?)").run("Cera Cítrica Carnauba Grado Alimento", "Químicos", 18, "tambos 200L", 5);
+  const insertInv = db.prepare(`
+    INSERT INTO inventory (item_name, category, quantity, unit, min_stock, critical_stock, cost_unit, supplier, sku)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  // Basic Packaging Materials (Boxes & Labels) - some configured below critical to trigger visual alerts
+  insertInv.run("Caja Exportación 18.14 kg (40 lbs) JBM Green Lemon", "Cajas & Empaque", 320, "pzas", 1200, 450, 48.50, "Cartonera del Golfo S.A. de C.V.", "CJ-EXP-40LBS");
+  insertInv.run("Caja Exportación 15 kg Master Cartón Corrugado", "Cajas & Empaque", 2400, "pzas", 800, 300, 42.00, "Cartonera del Golfo S.A. de C.V.", "CJ-EXP-15KG");
+  insertInv.run("Caja Nacional 20 kg Madera/Plástico", "Cajas & Empaque", 210, "pzas", 350, 120, 28.00, "Empaques Regionales Martínez", "CJ-NAC-20KG");
+  insertInv.run("Caja Telescópica 4.5 kg (10 lbs) Gourmet", "Cajas & Empaque", 45, "pzas", 250, 80, 22.50, "Cartonera del Golfo S.A. de C.V.", "CJ-TEL-10LBS");
+  
+  insertInv.run("Etiquetas Adhesivas PLU #4048 (Limón Mexicano Grande)", "Etiquetas & Marcaje", 1200, "millares", 6000, 2000, 0.18, "Etiquetas Industriales del Sureste", "LBL-PLU-4048");
+  insertInv.run("Etiquetas Adhesivas PLU #4045 (Limón Mexicano Mediano)", "Etiquetas & Marcaje", 8500, "millares", 5000, 1500, 0.18, "Etiquetas Industriales del Sureste", "LBL-PLU-4045");
+  insertInv.run("Etiquetas Trazabilidad SENASICA / USDA Lote Código QR", "Etiquetas & Marcaje", 420, "pzas", 2500, 800, 0.45, "Soluciones Gráficas Veracruz", "LBL-SENASICA-QR");
+  insertInv.run("Etiquetas Marca Comercial JBM Premium Citrus", "Etiquetas & Marcaje", 3400, "pzas", 2500, 800, 0.35, "Soluciones Gráficas Veracruz", "LBL-BRAND-JBM");
+
+  insertInv.run("Pallet Madera Tratada HT 40x48 (NIMF-15)", "Tarimas & Estiba", 140, "pzas", 100, 40, 230.00, "Maderas y Tarimas del Papaloapan", "PLT-HT-4048");
+  insertInv.run("Esquinero de Cartón Reforzado 2.0m", "Protección & Flejado", 320, "pzas", 500, 150, 14.50, "Cartonera del Golfo S.A. de C.V.", "ESQ-CRT-200");
+  insertInv.run("Fleje Polipropileno 1/2 pulgada (Rollos 3000m)", "Protección & Flejado", 8, "rollos", 15, 5, 850.00, "Flejados y Empaques Industriales", "FLJ-PP-050");
+  insertInv.run("Grapas Metálicas / Sellos para Fleje 1/2\"", "Protección & Flejado", 850, "pzas", 2000, 500, 0.85, "Flejados y Empaques Industriales", "GRP-MET-050");
+  insertInv.run("Cera Cítrica Carnauba Grado Alimento", "Tratamiento Poscosecha", 16, "tambos 200L", 6, 2, 14800.00, "Agroquímica Poscosecha Veracruz", "CER-CARN-200L");
+  insertInv.run("Papel Encerado Microperforado 30x30 cm", "Protección & Flejado", 550, "pliegos", 2500, 800, 0.90, "Papelera San Rafael", "PAP-ENC-3030");
+} else {
+  // Check if critical_stock is populated, if not set realistic defaults
+  try {
+    db.exec(`UPDATE inventory SET critical_stock = CAST(min_stock * 0.4 AS INTEGER) WHERE critical_stock IS NULL OR critical_stock = 0 OR critical_stock = 50`);
+  } catch (e) {
+    console.error("Critical stock update err:", e);
+  }
+}
+
+// Seed inventory logs if empty
+const logCount = db.prepare("SELECT COUNT(*) as count FROM inventory_logs").get() as { count: number };
+if (logCount.count === 0) {
+  const insertLog = db.prepare(`
+    INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertLog.run(1, "Caja Exportación 18.14 kg (40 lbs) JBM Green Lemon", "Salida", 450, 770, 320, "Consumo en línea de empaque para embarque McAllen EMB-084", "Carlos Barragán", "2026-08-24 11:30:00");
+  insertLog.run(5, "Etiquetas Adhesivas PLU #4048 (Limón Mexicano Grande)", "Salida", 1800, 3000, 1200, "Etiquetado manual en banda de selección", "Almacén", "2026-08-24 14:15:00");
+  insertLog.run(2, "Caja Exportación 15 kg Master Cartón Corrugado", "Entrada", 1000, 1400, 2400, "Recepción pedido proveedor Cartonera del Golfo", "Admin", "2026-08-23 09:00:00");
+  insertLog.run(7, "Etiquetas Trazabilidad SENASICA / USDA Lote Código QR", "Salida", 800, 1220, 420, "Identificación de tarimas para inspección fitosanitaria", "Carlos Barragán", "2026-08-24 16:45:00");
+  insertLog.run(4, "Caja Telescópica 4.5 kg (10 lbs) Gourmet", "Salida", 120, 165, 45, "Empaque de lote especial para supermercados", "Almacén", "2026-08-24 09:10:00");
 }
 
 // Seed settlements if empty
@@ -927,25 +998,247 @@ async function startServer() {
     }
   });
 
-  // Inventory
+  // Inventory & Supplies with Visual Alert Management
   app.get("/api/inventory", (req, res) => {
     try {
-      const items = db.prepare("SELECT * FROM inventory ORDER BY category, item_name").all();
-      res.json(items);
+      const items = db.prepare(`
+        SELECT 
+          id,
+          item_name,
+          COALESCE(category, 'Empaque') as category,
+          COALESCE(quantity, 0) as quantity,
+          COALESCE(unit, 'pzas') as unit,
+          COALESCE(min_stock, 100) as min_stock,
+          COALESCE(critical_stock, 50) as critical_stock,
+          COALESCE(cost_unit, 0) as cost_unit,
+          COALESCE(supplier, 'Cartonera del Golfo S.A.') as supplier,
+          COALESCE(sku, '') as sku,
+          COALESCE(lead_time_days, 3) as lead_time_days,
+          COALESCE(last_restock_date, datetime('now', 'localtime')) as last_restock_date
+        FROM inventory 
+        ORDER BY 
+          CASE 
+            WHEN quantity <= critical_stock THEN 1
+            WHEN quantity <= min_stock THEN 2
+            ELSE 3
+          END ASC,
+          category ASC, 
+          item_name ASC
+      `).all() as any[];
+
+      // Annotate with alert levels
+      const enriched = items.map(item => {
+        const isCritical = item.quantity <= item.critical_stock;
+        const isLow = !isCritical && item.quantity <= item.min_stock;
+        const status = isCritical ? 'critical' : isLow ? 'low' : 'optimal';
+        const deficit = Math.max(0, item.min_stock - item.quantity);
+        const criticalDeficit = Math.max(0, item.critical_stock - item.quantity);
+
+        return {
+          ...item,
+          status,
+          isCritical,
+          isLow,
+          deficit,
+          criticalDeficit,
+          reorderSuggestedQty: Math.max(0, (item.min_stock * 1.5) - item.quantity)
+        };
+      });
+
+      res.json(enriched);
     } catch (err: any) {
       console.error("Error in GET /api/inventory:", err);
       res.status(500).json({ error: err.message });
     }
   });
 
+  app.post("/api/inventory", (req, res) => {
+    try {
+      const { 
+        item_name, 
+        category = 'Empaque', 
+        quantity = 0, 
+        unit = 'pzas', 
+        min_stock = 100, 
+        critical_stock = 50, 
+        cost_unit = 0, 
+        supplier = 'Cartonera del Golfo S.A.', 
+        sku = '' 
+      } = req.body;
+
+      if (!item_name || !item_name.trim()) {
+        return res.status(400).json({ error: "El nombre del insumo es requerido." });
+      }
+
+      const result = db.prepare(`
+        INSERT INTO inventory (item_name, category, quantity, unit, min_stock, critical_stock, cost_unit, supplier, sku, last_restock_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+      `).run(item_name.trim(), category, quantity, unit, min_stock, critical_stock, cost_unit, supplier, sku);
+
+      const newItem = db.prepare("SELECT * FROM inventory WHERE id = ?").get(result.lastInsertRowid);
+      
+      // Log creation
+      db.prepare(`
+        INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+        VALUES (?, ?, 'Entrada', ?, 0, ?, 'Alta inicial de material en sistema', 'Admin', datetime('now', 'localtime'))
+      `).run(result.lastInsertRowid, item_name.trim(), quantity, quantity);
+
+      res.json(newItem);
+    } catch (err: any) {
+      console.error("Error in POST /api/inventory:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/inventory/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { 
+        item_name, 
+        category, 
+        quantity, 
+        unit, 
+        min_stock, 
+        critical_stock, 
+        cost_unit, 
+        supplier, 
+        sku 
+      } = req.body;
+
+      const current = db.prepare("SELECT * FROM inventory WHERE id = ?").get(id) as any;
+      if (!current) {
+        return res.status(404).json({ error: "Material no encontrado." });
+      }
+
+      db.prepare(`
+        UPDATE inventory 
+        SET 
+          item_name = COALESCE(?, item_name),
+          category = COALESCE(?, category),
+          quantity = COALESCE(?, quantity),
+          unit = COALESCE(?, unit),
+          min_stock = COALESCE(?, min_stock),
+          critical_stock = COALESCE(?, critical_stock),
+          cost_unit = COALESCE(?, cost_unit),
+          supplier = COALESCE(?, supplier),
+          sku = COALESCE(?, sku)
+        WHERE id = ?
+      `).run(
+        item_name, 
+        category, 
+        quantity !== undefined ? quantity : current.quantity, 
+        unit, 
+        min_stock !== undefined ? min_stock : current.min_stock, 
+        critical_stock !== undefined ? critical_stock : current.critical_stock, 
+        cost_unit, 
+        supplier, 
+        sku, 
+        id
+      );
+
+      // If quantity changed, log adjustment
+      if (quantity !== undefined && quantity !== current.quantity) {
+        const delta = quantity - current.quantity;
+        db.prepare(`
+          INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+          VALUES (?, ?, ?, ?, ?, ?, 'Actualización manual de parámetros y stock', 'Admin', datetime('now', 'localtime'))
+        `).run(id, current.item_name, delta >= 0 ? 'Entrada' : 'Salida', Math.abs(delta), current.quantity, quantity);
+      }
+
+      const updated = db.prepare("SELECT * FROM inventory WHERE id = ?").get(id);
+      res.json(updated);
+    } catch (err: any) {
+      console.error("Error in PUT /api/inventory/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/inventory/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const item = db.prepare("SELECT * FROM inventory WHERE id = ?").get(id) as any;
+      if (!item) {
+        return res.status(404).json({ error: "Material no encontrado" });
+      }
+      db.prepare("DELETE FROM inventory WHERE id = ?").run(id);
+      res.json({ success: true, deletedId: id, item_name: item.item_name });
+    } catch (err: any) {
+      console.error("Error in DELETE /api/inventory/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/inventory/adjust", (req, res) => {
     try {
-      const { id, delta } = req.body;
-      db.prepare("UPDATE inventory SET quantity = MAX(0, quantity + ?) WHERE id = ?").run(delta, id);
+      const { id, delta, type = 'Ajuste', reason = 'Ajuste de conteo físico', user = 'Almacén' } = req.body;
+      const current = db.prepare("SELECT * FROM inventory WHERE id = ?").get(id) as any;
+      if (!current) {
+        return res.status(404).json({ error: "Material no encontrado." });
+      }
+
+      const prevQty = current.quantity;
+      const newQty = Math.max(0, prevQty + delta);
+      const isRestock = delta > 0;
+
+      db.prepare(`
+        UPDATE inventory 
+        SET 
+          quantity = ?,
+          last_restock_date = CASE WHEN ? = 1 THEN datetime('now', 'localtime') ELSE last_restock_date END
+        WHERE id = ?
+      `).run(newQty, isRestock ? 1 : 0, id);
+
+      // Log movement
+      const logType = delta > 0 ? (type || 'Entrada') : (type || 'Salida');
+      db.prepare(`
+        INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+      `).run(id, current.item_name, logType, Math.abs(delta), prevQty, newQty, reason, user);
+
       const updated = db.prepare("SELECT * FROM inventory WHERE id = ?").get(id);
       res.json(updated);
     } catch (err: any) {
       console.error("Error in POST /api/inventory/adjust:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/inventory/logs", (req, res) => {
+    try {
+      const logs = db.prepare("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 50").all();
+      res.json(logs);
+    } catch (err: any) {
+      console.error("Error in GET /api/inventory/logs:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/inventory/configure-thresholds", (req, res) => {
+    try {
+      const { updates } = req.body; // Array of { id, min_stock, critical_stock }
+      if (!Array.isArray(updates)) {
+        return res.status(400).json({ error: "Se requiere una lista de actualizaciones." });
+      }
+
+      const updateStmt = db.prepare(`
+        UPDATE inventory 
+        SET 
+          min_stock = COALESCE(?, min_stock),
+          critical_stock = COALESCE(?, critical_stock)
+        WHERE id = ?
+      `);
+
+      const transaction = db.transaction((items: any[]) => {
+        for (const item of items) {
+          updateStmt.run(item.min_stock, item.critical_stock, item.id);
+        }
+      });
+
+      transaction(updates);
+      const allItems = db.prepare("SELECT * FROM inventory ORDER BY category, item_name").all();
+      res.json({ success: true, count: updates.length, items: allItems });
+    } catch (err: any) {
+      console.error("Error in POST /api/inventory/configure-thresholds:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -1225,6 +1518,448 @@ async function startServer() {
       res.json({ id: result.lastInsertRowid, folio, total });
     } catch (err: any) {
       console.error("Error in POST /api/sales:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Global Multi-Entity Search API
+  app.get("/api/search", (req, res) => {
+    try {
+      const query = String(req.query.q || '').trim();
+      const categoryFilter = String(req.query.category || 'all').toLowerCase(); // 'all', 'tickets', 'batches', 'clients', 'supplies'
+      const limit = Math.min(parseInt(String(req.query.limit || '20'), 10), 50);
+
+      if (!query) {
+        // Return recent items when query is empty
+        const recentTickets = db.prepare(`
+          SELECT b.*, COALESCE(p.name, 'SIN ASIGNAR') as producer_name
+          FROM batches b
+          LEFT JOIN producers p ON b.producer_id = p.id
+          ORDER BY b.id DESC LIMIT 4
+        `).all() as any[];
+
+        const recentPallets = db.prepare(`
+          SELECT * FROM pallets ORDER BY id DESC LIMIT 3
+        `).all() as any[];
+
+        const recentProducers = db.prepare(`
+          SELECT * FROM producers ORDER BY id DESC LIMIT 3
+        `).all() as any[];
+
+        const results: any[] = [];
+
+        recentTickets.forEach(b => {
+          results.push({
+            id: `ticket-${b.id}`,
+            category: 'tickets',
+            type: 'ticket',
+            title: `Boleta ${b.folio || 'REC-' + String(b.id).padStart(5, '0')}`,
+            subtitle: `${b.producer_name} • ${b.variety || 'Limón Mexicano'} • ${b.orchard || 'Pedernales'}`,
+            code: b.scale_ticket_folio ? `${b.folio} (Báscula: ${b.scale_ticket_folio})` : (b.folio || `REC-${b.id}`),
+            date: b.date,
+            badge: { text: `${(b.weight_net || 0).toLocaleString('es-MX')} kg`, variant: 'emerald' },
+            metrics: [
+              { label: 'Peso Neto', value: `${(b.weight_net || 0).toLocaleString('es-MX')} kg` },
+              { label: 'Liquidación', value: `$${(b.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+              { label: 'Precio/kg', value: `$${(b.price_per_kg || 18.50).toFixed(2)}` }
+            ],
+            route: `/recepcion?ticketId=${b.id}`,
+            rawData: b
+          });
+        });
+
+        recentPallets.forEach(p => {
+          results.push({
+            id: `pallet-${p.id}`,
+            category: 'batches',
+            type: 'pallet',
+            title: `Tarima ${p.pallet_number}`,
+            subtitle: `${p.presentation_name || 'Caja Exportación'} • Calibre ${p.calibre} (${p.color})`,
+            code: p.pallet_number,
+            date: p.packed_date,
+            badge: { text: `Zona ${p.location_zone || 'A1'}`, variant: 'indigo' },
+            metrics: [
+              { label: 'Cajas', value: `${p.boxes_count} cjs` },
+              { label: 'Peso', value: `${p.weight_kg} kg` },
+              { label: 'Estado', value: p.status === 'en_camara' ? 'Cámara Fría' : p.status }
+            ],
+            route: `/camara?pallet=${p.pallet_number}`,
+            rawData: p
+          });
+        });
+
+        recentProducers.forEach(pr => {
+          results.push({
+            id: `producer-${pr.id}`,
+            category: 'clients',
+            type: 'producer',
+            title: pr.name,
+            subtitle: `${pr.location || 'Martínez de la Torre'} • Huerto: ${pr.default_orchard || 'General'}`,
+            code: pr.rfc || `ID #${pr.id}`,
+            badge: { text: pr.rfc ? `RFC: ${pr.rfc}` : 'Productor', variant: 'amber' },
+            metrics: [
+              { label: 'Saldo Pendiente', value: `$${(pr.balance || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+              { label: 'Teléfono', value: pr.phone || 'Sin registrar' }
+            ],
+            route: `/finanzas?producerId=${pr.id}`,
+            rawData: pr
+          });
+        });
+
+        return res.json({
+          query: '',
+          count: results.length,
+          results
+        });
+      }
+
+      const searchPattern = `%${query}%`;
+      const numericQuery = parseInt(query, 10);
+      const isNumeric = !isNaN(numericQuery) && String(numericQuery) === query;
+      const results: any[] = [];
+
+      // 1. Search Weigh-in Tickets / Batches
+      if (categoryFilter === 'all' || categoryFilter === 'tickets') {
+        const ticketQuery = `
+          SELECT 
+            b.*,
+            COALESCE(p.name, 'SIN ASIGNAR') as producer_name,
+            COALESCE(p.rfc, '') as producer_rfc
+          FROM batches b
+          LEFT JOIN producers p ON b.producer_id = p.id
+          WHERE 
+            b.folio LIKE ? 
+            OR b.scale_ticket_folio LIKE ? 
+            OR b.id = ? 
+            OR p.name LIKE ? 
+            OR p.rfc LIKE ?
+            OR b.orchard LIKE ? 
+            OR b.origin LIKE ? 
+            OR b.variety LIKE ? 
+            OR b.quality LIKE ?
+            OR b.operator LIKE ?
+            OR b.notes LIKE ?
+          ORDER BY b.id DESC
+          LIMIT ?
+        `;
+        const ticketMatches = db.prepare(ticketQuery).all(
+          searchPattern, 
+          searchPattern, 
+          isNumeric ? numericQuery : -1, 
+          searchPattern, 
+          searchPattern,
+          searchPattern, 
+          searchPattern, 
+          searchPattern, 
+          searchPattern, 
+          searchPattern,
+          searchPattern,
+          limit
+        ) as any[];
+
+        ticketMatches.forEach(b => {
+          results.push({
+            id: `ticket-${b.id}`,
+            category: 'tickets',
+            type: 'ticket',
+            title: `Boleta ${b.folio || 'REC-' + String(b.id).padStart(5, '0')}`,
+            subtitle: `${b.producer_name} • ${b.variety || 'Limón Mexicano'} (${b.orchard || 'Pedernales'})`,
+            code: b.scale_ticket_folio ? `${b.folio} | Báscula: ${b.scale_ticket_folio}` : (b.folio || `REC-${b.id}`),
+            date: b.date,
+            badge: { 
+              text: `${(b.weight_net || 0).toLocaleString('es-MX')} kg`, 
+              variant: b.status === 'completado' ? 'emerald' : 'amber' 
+            },
+            metrics: [
+              { label: 'Bruto', value: `${(b.weight_gross || 0).toLocaleString('es-MX')} kg` },
+              { label: 'Tara', value: `${(b.weight_tare || 0).toLocaleString('es-MX')} kg` },
+              { label: 'Neto', value: `${(b.weight_net || 0).toLocaleString('es-MX')} kg` },
+              { label: 'Total', value: `$${(b.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` }
+            ],
+            route: `/recepcion?ticketId=${b.id}&folio=${encodeURIComponent(b.folio || '')}`,
+            rawData: b
+          });
+        });
+      }
+
+      // 2. Search Product Batches & Pallets
+      if (categoryFilter === 'all' || categoryFilter === 'batches') {
+        // Pallets
+        const palletQuery = `
+          SELECT 
+            p.*,
+            COALESCE(b.folio, 'REC-' || printf('%05d', b.id)) as batch_folio,
+            COALESCE(pr.name, 'Productor') as producer_name
+          FROM pallets p
+          LEFT JOIN batches b ON p.batch_id = b.id
+          LEFT JOIN producers pr ON b.producer_id = pr.id
+          WHERE 
+            p.pallet_number LIKE ? 
+            OR p.id = ? 
+            OR p.calibre LIKE ? 
+            OR p.color LIKE ? 
+            OR p.presentation_name LIKE ? 
+            OR p.location_zone LIKE ? 
+            OR p.status LIKE ?
+            OR b.folio LIKE ?
+          ORDER BY p.id DESC
+          LIMIT ?
+        `;
+        const palletMatches = db.prepare(palletQuery).all(
+          searchPattern,
+          isNumeric ? numericQuery : -1,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          limit
+        ) as any[];
+
+        palletMatches.forEach(p => {
+          results.push({
+            id: `pallet-${p.id}`,
+            category: 'batches',
+            type: 'pallet',
+            title: `Tarima ${p.pallet_number}`,
+            subtitle: `${p.presentation_name || 'Caja Exportación'} • Calibre ${p.calibre} (${p.color}) • Lote ${p.batch_folio}`,
+            code: p.pallet_number,
+            date: p.packed_date,
+            badge: { 
+              text: `Ubicación: ${p.location_zone || 'A1'}`, 
+              variant: p.status === 'en_camara' ? 'indigo' : 'purple' 
+            },
+            metrics: [
+              { label: 'Cajas', value: `${p.boxes_count} cjs` },
+              { label: 'Peso', value: `${p.weight_kg} kg` },
+              { label: 'Calidad', value: p.quality || 'Primera' },
+              { label: 'Estado', value: p.status === 'en_camara' ? 'En Cámara Fría' : p.status }
+            ],
+            route: `/camara?pallet=${p.pallet_number}`,
+            rawData: p
+          });
+        });
+
+        // Production Runs
+        const runQuery = `
+          SELECT 
+            pr.*,
+            COALESCE(b.folio, 'REC-' || printf('%05d', b.id)) as batch_folio,
+            COALESCE(p.name, 'Productor') as producer_name
+          FROM production_runs pr
+          LEFT JOIN batches b ON pr.batch_id = b.id
+          LEFT JOIN producers p ON b.producer_id = p.id
+          WHERE 
+            pr.id = ? 
+            OR pr.calibre LIKE ? 
+            OR pr.color LIKE ? 
+            OR pr.presentation_name LIKE ? 
+            OR pr.destination LIKE ? 
+            OR b.folio LIKE ?
+            OR pr.notes LIKE ?
+          ORDER BY pr.id DESC
+          LIMIT ?
+        `;
+        const runMatches = db.prepare(runQuery).all(
+          isNumeric ? numericQuery : -1,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          limit
+        ) as any[];
+
+        runMatches.forEach(r => {
+          results.push({
+            id: `run-${r.id}`,
+            category: 'batches',
+            type: 'production_run',
+            title: `Corrida #${r.id} (${r.calibre} - ${r.color})`,
+            subtitle: `${r.presentation_name || 'Granel'} • ${(r.weight_total_kg || 0).toLocaleString('es-MX')} kg • Lote ${r.batch_folio}`,
+            code: `Lote ${r.batch_folio} / Corrida #${r.id}`,
+            date: r.date,
+            badge: { 
+              text: `${r.boxes_count || 0} Cajas`, 
+              variant: 'blue' 
+            },
+            metrics: [
+              { label: 'Calibre', value: r.calibre },
+              { label: 'Color', value: r.color },
+              { label: 'Destino', value: r.destination === 'camara_fria' ? 'Cámara Fría' : r.destination },
+              { label: 'Costo Total', value: `$${(r.cost_total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` }
+            ],
+            route: `/produccion?runId=${r.id}`,
+            rawData: r
+          });
+        });
+      }
+
+      // 3. Search Clients & Producers & Shipment Buyers
+      if (categoryFilter === 'all' || categoryFilter === 'clients') {
+        // Producers
+        const producerQuery = `
+          SELECT 
+            p.*,
+            (SELECT COUNT(*) FROM batches WHERE producer_id = p.id) as total_batches,
+            (SELECT COALESCE(SUM(weight_net), 0) FROM batches WHERE producer_id = p.id) as total_kg_delivered
+          FROM producers p
+          WHERE 
+            p.name LIKE ? 
+            OR p.rfc LIKE ? 
+            OR p.phone LIKE ? 
+            OR p.location LIKE ? 
+            OR p.default_orchard LIKE ? 
+            OR p.id = ?
+          ORDER BY p.name ASC
+          LIMIT ?
+        `;
+        const producerMatches = db.prepare(producerQuery).all(
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          isNumeric ? numericQuery : -1,
+          limit
+        ) as any[];
+
+        producerMatches.forEach(pr => {
+          results.push({
+            id: `producer-${pr.id}`,
+            category: 'clients',
+            type: 'producer',
+            title: pr.name,
+            subtitle: `Productor / Citricultor • ${pr.location || 'Martínez de la Torre'}`,
+            code: pr.rfc ? `RFC: ${pr.rfc}` : `Productor ID #${pr.id}`,
+            badge: { text: 'Productor', variant: 'amber' },
+            metrics: [
+              { label: 'Saldo', value: `$${(pr.balance || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
+              { label: 'Boletas', value: `${pr.total_batches || 0} entregas` },
+              { label: 'Kg Acopiados', value: `${(pr.total_kg_delivered || 0).toLocaleString('es-MX')} kg` }
+            ],
+            route: `/finanzas?producerId=${pr.id}`,
+            rawData: pr
+          });
+        });
+
+        // Sales / POS Customers
+        const salesQuery = `
+          SELECT * FROM sales 
+          WHERE customer_name LIKE ? OR folio LIKE ? OR id = ?
+          ORDER BY id DESC LIMIT ?
+        `;
+        const salesMatches = db.prepare(salesQuery).all(
+          searchPattern,
+          searchPattern,
+          isNumeric ? numericQuery : -1,
+          limit
+        ) as any[];
+
+        salesMatches.forEach(s => {
+          results.push({
+            id: `sale-${s.id}`,
+            category: 'clients',
+            type: 'customer',
+            title: s.customer_name || 'Venta Mostrador',
+            subtitle: `Venta Mostrador / Cliente • Folio ${s.folio}`,
+            code: s.folio,
+            date: s.date,
+            badge: { text: `Venta: $${(s.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, variant: 'emerald' },
+            metrics: [
+              { label: 'Folio', value: s.folio },
+              { label: 'Pago', value: s.payment_method || 'Efectivo' },
+              { label: 'Artículos', value: `${s.items_count || 1} cjs` }
+            ],
+            route: `/ventas?folio=${encodeURIComponent(s.folio || '')}`,
+            rawData: s
+          });
+        });
+
+        // Shipments Clients
+        const shipmentQuery = `
+          SELECT * FROM shipments 
+          WHERE client_name LIKE ? OR destination LIKE ? OR folio LIKE ? OR id = ?
+          ORDER BY id DESC LIMIT ?
+        `;
+        const shipmentMatches = db.prepare(shipmentQuery).all(
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          isNumeric ? numericQuery : -1,
+          limit
+        ) as any[];
+
+        shipmentMatches.forEach(sh => {
+          results.push({
+            id: `shipment-${sh.id}`,
+            category: 'clients',
+            type: 'shipment_client',
+            title: sh.client_name || sh.destination,
+            subtitle: `Comprador Exportación / Destino: ${sh.destination} • Embarque ${sh.folio}`,
+            code: sh.folio,
+            date: sh.departure_date,
+            badge: { text: `Embarque ${sh.status || 'preparando'}`, variant: 'rose' },
+            metrics: [
+              { label: 'Destino', value: sh.destination },
+              { label: 'Tarimas', value: `${sh.total_pallets || 0} plts` },
+              { label: 'Kilos', value: `${(sh.total_kg || 0).toLocaleString('es-MX')} kg` }
+            ],
+            route: `/logistica?shipment=${encodeURIComponent(sh.folio || '')}`,
+            rawData: sh
+          });
+        });
+      }
+
+      // 4. Search Packaging / Inventory items
+      if (categoryFilter === 'all' || categoryFilter === 'supplies') {
+        const invQuery = `
+          SELECT * FROM inventory 
+          WHERE item_name LIKE ? OR sku LIKE ? OR supplier LIKE ? OR category LIKE ? OR id = ?
+          ORDER BY id ASC LIMIT ?
+        `;
+        const invMatches = db.prepare(invQuery).all(
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          searchPattern,
+          isNumeric ? numericQuery : -1,
+          limit
+        ) as any[];
+
+        invMatches.forEach(item => {
+          const isCritical = item.quantity <= (item.critical_stock || (item.min_stock * 0.4));
+          results.push({
+            id: `inventory-${item.id}`,
+            category: 'supplies',
+            type: 'supply',
+            title: item.item_name,
+            subtitle: `${item.category} • Proveedor: ${item.supplier || 'Cartonera'}`,
+            code: item.sku || `SKU-${item.id}`,
+            badge: { 
+              text: `${item.quantity} ${item.unit || 'pzas'}`, 
+              variant: isCritical ? 'rose' : (item.quantity <= item.min_stock ? 'amber' : 'emerald') 
+            },
+            metrics: [
+              { label: 'Existencia', value: `${item.quantity} ${item.unit || 'pzas'}` },
+              { label: 'Mínimo', value: `${item.min_stock} ${item.unit || 'pzas'}` },
+              { label: 'Costo Unit.', value: `$${(item.cost_unit || 0).toFixed(2)}` }
+            ],
+            route: `/insumos?itemId=${item.id}`,
+            rawData: item
+          });
+        });
+      }
+
+      res.json({
+        query,
+        count: results.length,
+        results
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/search:", err);
       res.status(500).json({ error: err.message });
     }
   });

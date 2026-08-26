@@ -316,6 +316,24 @@ export function Reception() {
     };
   }, [fetchData, refreshOfflineQueue, handleSyncBatches]);
 
+  // Handle URL Query Params from Global Search
+  React.useEffect(() => {
+    if (batches.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const ticketIdParam = params.get('ticketId');
+      const folioParam = params.get('folio');
+      if (ticketIdParam) {
+        const found = batches.find(b => String(b.id) === ticketIdParam);
+        if (found) {
+          setSelectedTicket(found);
+          if (found.folio) setSearchTerm(found.folio);
+        }
+      } else if (folioParam) {
+        setSearchTerm(folioParam);
+      }
+    }
+  }, [batches]);
+
   // When simulated offline is toggled off, trigger sync
   const toggleSimulatedOffline = () => {
     setSimulatedOffline(prev => {

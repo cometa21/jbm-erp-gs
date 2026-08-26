@@ -43,6 +43,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import type { DashboardStats } from '../types';
+import { Reception7DayTrendCard } from './Reception7DayTrendCard';
 
 interface DailyDataPoint {
   date: string;
@@ -348,6 +349,18 @@ export function Dashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* 7-DAY RECEPTION VOLUME TREND SUMMARY CARD (RECHARTS) */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+      >
+        <Reception7DayTrendCard 
+          data={dailyData} 
+          targetCapacityKg={summary?.standardCapacityKgDay || 12000} 
+        />
+      </motion.div>
 
       {/* SECTION 1: CHART OF 30-DAY CITRUS RECEPTION VOLUME */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-xs border border-slate-200 space-y-5">

@@ -38,8 +38,29 @@ export interface Batch {
 export interface InventoryItem {
   id: number;
   item_name: string;
+  category: string;
   quantity: number;
   unit: string;
+  min_stock: number;
+  critical_stock?: number;
+  cost_unit?: number;
+  supplier?: string;
+  sku?: string;
+  lead_time_days?: number;
+  last_restock_date?: string;
+}
+
+export interface InventoryLog {
+  id: number;
+  item_id?: number;
+  item_name: string;
+  type: 'Entrada' | 'Salida' | 'Ajuste' | 'Merma';
+  qty: number;
+  prev_qty?: number;
+  new_qty?: number;
+  reason?: string;
+  user: string;
+  date: string;
 }
 
 export interface DashboardStats {
@@ -148,5 +169,35 @@ export interface Shipment {
   operator?: string;
   notes?: string;
   pallets?: Pallet[];
+}
+
+export type SearchCategory = 'all' | 'tickets' | 'batches' | 'clients' | 'supplies';
+
+export interface SearchMetric {
+  label: string;
+  value: string;
+}
+
+export interface SearchResultItem {
+  id: string;
+  category: 'tickets' | 'batches' | 'clients' | 'supplies';
+  type: 'ticket' | 'production_run' | 'pallet' | 'producer' | 'customer' | 'shipment_client' | 'supply';
+  title: string;
+  subtitle: string;
+  code: string;
+  date?: string;
+  badge: {
+    text: string;
+    variant: 'emerald' | 'amber' | 'blue' | 'indigo' | 'purple' | 'rose' | 'slate';
+  };
+  metrics?: SearchMetric[];
+  route: string;
+  rawData: any;
+}
+
+export interface SearchApiResponse {
+  query: string;
+  count: number;
+  results: SearchResultItem[];
 }
 
