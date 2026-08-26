@@ -18,6 +18,7 @@ interface SuppliesAlertsBannerProps {
   onOpenThresholdConfig: () => void;
   onOpenPurchaseOrder: () => void;
   onFilterCritical: () => void;
+  onOpenNotificationConfig?: () => void;
   activeFilter: string;
 }
 
@@ -26,6 +27,7 @@ export function SuppliesAlertsBanner({
   onOpenThresholdConfig,
   onOpenPurchaseOrder,
   onFilterCritical,
+  onOpenNotificationConfig,
   activeFilter,
 }: SuppliesAlertsBannerProps) {
   const criticalItems = items.filter(item => (item.quantity <= (item.critical_stock ?? (item.min_stock * 0.4))));
@@ -107,6 +109,17 @@ export function SuppliesAlertsBanner({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+            {onOpenNotificationConfig && (
+              <button
+                type="button"
+                onClick={onOpenNotificationConfig}
+                className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+                title="Configurar notificaciones en segundo plano para desabasto crítico"
+              >
+                <BellRing size={14} className="text-emerald-600" />
+                <span>Alertas de Escritorio</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onOpenThresholdConfig}

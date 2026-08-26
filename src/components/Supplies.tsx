@@ -32,6 +32,7 @@ import { SuppliesThresholdModal } from './SuppliesThresholdModal';
 import { SuppliesMovementModal } from './SuppliesMovementModal';
 import { SuppliesPurchaseOrderModal } from './SuppliesPurchaseOrderModal';
 import { SuppliesItemModal } from './SuppliesItemModal';
+import { SuppliesNotificationModal } from './SuppliesNotificationModal';
 
 export function Supplies() {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -42,6 +43,7 @@ export function Supplies() {
   const [activeAlertFilter, setActiveAlertFilter] = useState<'all' | 'critical' | 'low' | 'optimal'>('all');
 
   // Modals state
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -215,6 +217,7 @@ export function Supplies() {
         items={items}
         onOpenThresholdConfig={() => setIsThresholdModalOpen(true)}
         onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
+        onOpenNotificationConfig={() => setIsNotificationModalOpen(true)}
         onFilterCritical={() => setActiveAlertFilter('critical')}
         activeFilter={activeAlertFilter}
       />
@@ -629,6 +632,12 @@ export function Supplies() {
         item={movementItem}
         defaultType={movementType}
         onSuccess={fetchData}
+      />
+
+      {/* 5. Browser Background Notifications Modal */}
+      <SuppliesNotificationModal
+        isOpen={isNotificationModalOpen}
+        onClose={() => setIsNotificationModalOpen(false)}
       />
     </div>
   );

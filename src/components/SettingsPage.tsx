@@ -1,12 +1,43 @@
 import React from 'react';
-import { Settings, Building2, Scale, Printer, Shield, Save, CheckCircle, Database, Cloud, RefreshCw, Check } from 'lucide-react';
+import { 
+  Settings, 
+  Building2, 
+  Scale, 
+  Printer, 
+  Shield, 
+  Save, 
+  CheckCircle, 
+  Database, 
+  Cloud, 
+  RefreshCw, 
+  Check, 
+  Bell, 
+  BellRing, 
+  BellOff, 
+  Volume2, 
+  VolumeX, 
+  Sparkles,
+  ShieldAlert
+} from 'lucide-react';
 import { Logo } from './Logo';
 import { getCloudBatches, saveCloudBatch } from '../lib/cloudService';
+import { useSuppliesNotificationMonitor } from '../hooks/useSuppliesNotificationMonitor';
 
 export function SettingsPage() {
   const [saved, setSaved] = React.useState(false);
   const [cloudStatus, setCloudStatus] = React.useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
   const [cloudCount, setCloudCount] = React.useState<number | null>(null);
+  const [testSent, setTestSent] = React.useState(false);
+
+  const {
+    permission,
+    soundEnabled,
+    requestPermission,
+    toggleSound,
+    sendTestNotification,
+    criticalCount
+  } = useSuppliesNotificationMonitor();
+
   const [settings, setSettings] = React.useState({
     name: 'JBM CÍTRICOS BARRAGÁN',
     trade_name: 'LIMONES BARRAGAN',
@@ -181,6 +212,97 @@ export function SettingsPage() {
               )}
             </div>
           </form>
+
+          {/* Background Notification Settings Card */}
+          <div className="mt-8 pt-6 border-t border-slate-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${
+                  permission === 'granted' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {permission === 'granted' ? <BellRing size={18} /> : <Bell size={18} />}
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Notificaciones en Segundo Plano (Web Notifications API)
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Alertas automáticas en el navegador cuando el inventario de empaque caiga en nivel crítico
+                  </p>
+                </div>
+              </div>
+
+              <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                permission === 'granted' ? 'bg-emerald-100 text-emerald-800' :
+                permission === 'denied' ? 'bg-rose-100 text-rose-800' :
+                'bg-amber-100 text-amber-800'
+              }`}>
+                {permission === 'granted' ? '● Habilitadas' :
+                 permission === 'denied' ? '● Bloqueadas en Navegador' :
+                 '● Permiso Pendiente'}
+              </span>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-800">Permisos del Sistema Operativo</p>
+                  <p className="text-[11px] text-slate-500">
+                    Permite desplegar alertas nativas flotantes incluso con la pestaña minimizada.
+                  </p>
+                </div>
+                {permission !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={requestPermission}
+                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
+                  >
+                    Activar Notificaciones
+                  </button>
+                )}
+              </div>
+
+              {/* Sound Option */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                <div className="flex items-center gap-2.5">
+                  {soundEnabled ? <Volume2 size={16} className="text-emerald-700" /> : <VolumeX size={16} className="text-slate-400" />}
+                  <div>
+                    <span className="text-xs font-bold text-slate-800">Alerta Sonora (Chime Acústico)</span>
+                    <p className="text-[11px] text-slate-400">Emite un tono acústico con Web Audio API</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={soundEnabled}
+                    onChange={(e) => toggleSound(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* Test Button */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                <div>
+                  <span className="text-xs font-bold text-slate-800">Verificación de Entrega</span>
+                  <p className="text-[11px] text-slate-400">Prueba el disparo de notificación emergente y audio</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    sendTestNotification();
+                    setTestSent(true);
+                    setTimeout(() => setTestSent(false), 2500);
+                  }}
+                  className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-xl shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles size={13} className="text-emerald-600" />
+                  <span>{testSent ? '¡Enviada!' : 'Probar Notificación'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Brand Preview Card */}
