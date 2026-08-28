@@ -33,6 +33,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import type { Batch, ProductionRecord, ProductionPresentation, DiscardReportRow } from '../types';
 import { Logo } from './Logo';
+import { ProductionBatchYieldTracker } from './ProductionBatchYieldTracker';
 
 // --- SISTEMA DE CALIBRES CITRÍCOLAS ESTANDARIZADOS POR COLOR ---
 export const CALIBRES_POR_COLOR = {
@@ -575,6 +576,15 @@ export function Production() {
           </div>
         </div>
       </div>
+
+      {/* Visualización de Rendimiento & Avance de Lotes Activos con Recharts */}
+      <ProductionBatchYieldTracker
+        batches={batches}
+        productionRuns={productionRuns}
+        discards={discards}
+        selectedBatchId={selectedBatchId}
+        onSelectBatch={(batchId) => setSelectedBatchId(batchId)}
+      />
 
       {/* Main Grid: Left = Classification Form (8 cols), Right = Caliber Chart & Status (4 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

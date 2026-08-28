@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "Batch": {
+      "title": "Batch",
+      "description": "Lote o boleta de recepción de cítricos en báscula",
+      "type": "object",
+      "properties": {
+        "folio": { "type": "string", "description": "Folio de recepción" },
+        "producer_id": { "type": "string", "description": "ID del productor" },
+        "producer_name": { "type": "string", "description": "Nombre del productor" },
+        "orchard": { "type": "string", "description": "Nombre del huerto" },
+        "driver_name": { "type": "string", "description": "Nombre del chofer" },
+        "plates": { "type": "string", "description": "Placas del vehículo" },
+        "weight_gross": { "type": "number", "description": "Peso bruto en kg" },
+        "weight_tara": { "type": "number", "description": "Peso tara en kg" },
+        "weight_net": { "type": "number", "description": "Peso neto en kg" },
+        "date": { "type": "string", "description": "Fecha de recepción ISO" },
+        "status": { "type": "string", "description": "Estado del lote" }
+      },
+      "required": ["folio", "producer_name", "weight_net", "date"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Artículo de insumo o empaque en almacén",
+      "type": "object",
+      "properties": {
+        "item_name": { "type": "string", "description": "Nombre del insumo" },
+        "category": { "type": "string", "description": "Categoría de insumo" },
+        "quantity": { "type": "number", "description": "Cantidad en inventario" },
+        "unit": { "type": "string", "description": "Unidad de medida" },
+        "min_stock": { "type": "number", "description": "Nivel de stock mínimo" },
+        "critical_stock": { "type": "number", "description": "Nivel de stock crítico" },
+        "cost_unit": { "type": "number", "description": "Costo unitario MXN" },
+        "sku": { "type": "string", "description": "Código SKU" }
+      },
+      "required": ["item_name", "quantity", "unit"]
+    },
+    "SaleRecord": {
+      "title": "SaleRecord",
+      "description": "Venta o ticket en punto de venta POS",
+      "type": "object",
+      "properties": {
+        "folio": { "type": "string", "description": "Folio de venta" },
+        "customer_name": { "type": "string", "description": "Nombre del cliente" },
+        "total": { "type": "number", "description": "Monto total MXN" },
+        "subtotal": { "type": "number", "description": "Subtotal MXN" },
+        "tax": { "type": "number", "description": "IVA MXN" },
+        "payment_method": { "type": "string", "description": "Método de pago" },
+        "date": { "type": "string", "description": "Fecha y hora de venta ISO" }
+      },
+      "required": ["folio", "total", "date"]
+    }
+  },
+  "firestore": {
+    "/batches/{batchId}": {
+      "schema": "Batch",
+      "description": "Colección de lotes recibidos en báscula"
+    },
+    "/inventory/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Colección de insumos y materiales"
+    },
+    "/sales/{saleId}": {
+      "schema": "SaleRecord",
+      "description": "Colección de transacciones de venta"
+    }
+  }
+}

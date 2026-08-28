@@ -177,7 +177,8 @@ export const POSTabRentabilidad: React.FC<POSTabRentabilidadProps> = ({ currentR
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {Object.entries(data.salesByCalibre || {}).map(([calibre, stats]) => {
+                {Object.entries(data.salesByCalibre || {}).map(([calibre, rawStats]) => {
+                  const stats = rawStats as { revenue: number; kg: number; cost: number; profit: number };
                   const marginPct = stats.revenue > 0 ? (stats.profit / stats.revenue) * 100 : 0;
 
                   return (
@@ -221,7 +222,8 @@ export const POSTabRentabilidad: React.FC<POSTabRentabilidadProps> = ({ currentR
             </h3>
 
             <div className="space-y-2 text-xs divide-y divide-slate-100">
-              {Object.entries(data.expensesByCategory || {}).map(([cat, amt]) => {
+              {Object.entries(data.expensesByCategory || {}).map(([cat, rawAmt]) => {
+                const amt = Number(rawAmt) || 0;
                 const pct = data.totalLocalExpenses > 0 ? (amt / data.totalLocalExpenses) * 100 : 0;
 
                 return (

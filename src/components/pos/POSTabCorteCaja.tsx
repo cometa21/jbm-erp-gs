@@ -66,7 +66,7 @@ export const POSTabCorteCaja: React.FC<POSTabCorteCajaProps> = ({ currentRole })
 
   // Calculate total declared cash from denominations
   const totalFromDenominations = Object.entries(denominations).reduce((sum, [denom, count]) => {
-    return sum + parseFloat(denom) * (count || 0);
+    return sum + (parseFloat(denom) * (Number(count) || 0));
   }, 0);
 
   const declaredCash = useDenominations ? totalFromDenominations : (typeof directCashTotal === 'number' ? directCashTotal : 0);

@@ -44,6 +44,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import type { DashboardStats } from '../types';
 import { Reception7DayTrendCard } from './Reception7DayTrendCard';
+import { DashboardFirestoreSummaryCards } from './DashboardFirestoreSummaryCards';
 
 interface DailyDataPoint {
   date: string;
@@ -221,6 +222,9 @@ export function Dashboard() {
           </div>
         </div>
       </header>
+
+      {/* Tarjetas de Resumen en Tiempo Real de Firestore (Tonelaje, Inventario Activo, Ventas Diarias) */}
+      <DashboardFirestoreSummaryCards />
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
