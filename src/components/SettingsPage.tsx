@@ -17,17 +17,27 @@ import {
   Volume2, 
   VolumeX, 
   Sparkles,
-  ShieldAlert
+  ShieldAlert,
+  Sun,
+  Moon,
+  Laptop,
+  Eye,
+  Zap,
+  Clock,
+  Compass
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { getCloudBatches, saveCloudBatch } from '../lib/cloudService';
 import { useSuppliesNotificationMonitor } from '../hooks/useSuppliesNotificationMonitor';
+import { useTheme, type ThemeMode } from '../context/ThemeContext';
 
 export function SettingsPage() {
   const [saved, setSaved] = React.useState(false);
   const [cloudStatus, setCloudStatus] = React.useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
   const [cloudCount, setCloudCount] = React.useState<number | null>(null);
   const [testSent, setTestSent] = React.useState(false);
+
+  const { theme, resolvedTheme, setTheme } = useTheme();
 
   const {
     permission,
@@ -88,13 +98,225 @@ export function SettingsPage() {
       <header className="flex justify-between items-center border-b border-slate-200 pb-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">
-            Configuración de Empresa & Membretes
+            Configuración del Sistema & Empresa
           </h1>
           <p className="text-sm text-slate-500 font-medium mt-0.5">
-            Personalización de tickets térmicos de báscula, documentos oficiales y tarifas
+            Personalización de tickets térmicos, tarifas, notificaciones y apariencia visual para turnos de planta
           </p>
         </div>
       </header>
+
+      {/* ========================================================================= */}
+      {/* THEME & NIGHT SHIFT SELECTION CARD (JORNADA NOCTURNA EN PLANTA)           */}
+      {/* ========================================================================= */}
+      <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className={`p-2.5 rounded-2xl ${
+              resolvedTheme === 'night-plant'
+                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                : resolvedTheme === 'dark'
+                ? 'bg-indigo-950 text-indigo-400 border border-indigo-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}>
+              {resolvedTheme === 'night-plant' ? (
+                <Moon size={22} className="text-emerald-400" />
+              ) : resolvedTheme === 'dark' ? (
+                <Moon size={22} className="text-indigo-400" />
+              ) : (
+                <Sun size={22} className="text-amber-600" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                Selector de Tema & Modo Jornada Nocturna
+                {resolvedTheme === 'night-plant' && (
+                  <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-900/80 text-emerald-300 border border-emerald-700">
+                    Jornada Nocturna Activa
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">
+                Paleta de colores de alto contraste antirreflejo para terminales de pesaje, cámaras frías y patios nocturnos
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500">Tema Activo:</span>
+            <span className="px-3 py-1 rounded-xl text-xs font-black bg-slate-100 text-slate-800 border border-slate-200">
+              {theme === 'light' ? '☀️ Claro' : theme === 'night-plant' ? '🌙 Nocturno Planta' : theme === 'dark' ? '🌑 Oscuro' : '⚡ Automático'}
+            </span>
+          </div>
+        </div>
+
+        {/* Theme Options Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Option 1: Light Mode */}
+          <button
+            type="button"
+            onClick={() => setTheme('light')}
+            className={`p-4 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+              theme === 'light'
+                ? 'border-amber-500 bg-amber-50/50 ring-2 ring-amber-400/50 shadow-sm'
+                : 'border-slate-200 hover:border-slate-300 bg-slate-50/70 hover:bg-slate-50'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                  <Sun size={17} />
+                </div>
+                {theme === 'light' && (
+                  <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm font-black text-slate-900">Modo Claro (Diurno)</h3>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Diseño estándar con luz natural para oficinas administrativas y pesaje diurno.
+              </p>
+            </div>
+            <div className="mt-4 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5 text-[10px] font-bold text-amber-800">
+              <span>● Luz Matutina</span>
+            </div>
+          </button>
+
+          {/* Option 2: Night-Plant Shift Mode (High Contrast Packing Plant) */}
+          <button
+            type="button"
+            onClick={() => setTheme('night-plant')}
+            className={`p-4 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+              theme === 'night-plant'
+                ? 'border-emerald-500 bg-emerald-950/40 ring-2 ring-emerald-400/50 shadow-md'
+                : 'border-slate-200 hover:border-slate-300 bg-slate-50/70 hover:bg-slate-50'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-950 text-emerald-400 flex items-center justify-center border border-emerald-700/50">
+                  <Moon size={17} />
+                </div>
+                {theme === 'night-plant' && (
+                  <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center text-[10px] font-black">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-sm font-black text-slate-900">Jornada Nocturna</h3>
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-700">
+                  Planta
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Fondo ultranegro antirreflejo con alto contraste (WCAG AAA) para cuartos fríos y báscula nocturna.
+              </p>
+            </div>
+            <div className="mt-4 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
+              <Zap size={11} />
+              <span>Alto Contraste & Cero Fatiga</span>
+            </div>
+          </button>
+
+          {/* Option 3: Standard Dark Mode */}
+          <button
+            type="button"
+            onClick={() => setTheme('dark')}
+            className={`p-4 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+              theme === 'dark'
+                ? 'border-indigo-500 bg-indigo-950/30 ring-2 ring-indigo-400/50 shadow-sm'
+                : 'border-slate-200 hover:border-slate-300 bg-slate-50/70 hover:bg-slate-50'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="w-8 h-8 rounded-xl bg-slate-800 text-indigo-300 flex items-center justify-center">
+                  <Sparkles size={17} />
+                </div>
+                {theme === 'dark' && (
+                  <span className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center text-[10px] font-bold">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm font-black text-slate-900">Modo Oscuro Balanceado</h3>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Tonalidad pizarra suave para interiores de empaque con iluminación mixta.
+              </p>
+            </div>
+            <div className="mt-4 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5 text-[10px] font-bold text-indigo-600">
+              <span>● Slate Profundo</span>
+            </div>
+          </button>
+
+          {/* Option 4: System / Automated Shift Mode */}
+          <button
+            type="button"
+            onClick={() => setTheme('system')}
+            className={`p-4 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+              theme === 'system'
+                ? 'border-emerald-500 bg-slate-100 ring-2 ring-emerald-400/50 shadow-sm'
+                : 'border-slate-200 hover:border-slate-300 bg-slate-50/70 hover:bg-slate-50'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="w-8 h-8 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center">
+                  <Laptop size={17} />
+                </div>
+                {theme === 'system' && (
+                  <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">
+                    ✓
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm font-black text-slate-900">Automático (Turno / SO)</h3>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Cambia automáticamente a Jornada Nocturna a las 19:00 hrs y a Modo Claro al amanecer (07:00 hrs).
+              </p>
+            </div>
+            <div className="mt-4 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+              <Clock size={11} />
+              <span>Programación 19:00 - 07:00</span>
+            </div>
+          </button>
+        </div>
+
+        {/* Plant Environment Simulation Strip */}
+        <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-emerald-400 flex items-center justify-center shrink-0">
+              <Eye size={20} />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                Optimización Visual de Planta JBM
+              </h4>
+              <p className="text-[11px] text-slate-600">
+                La tipografía monocromática y los acentos esmeralda y ámbar garantizan una lectura nítida de pesos en báscula a 3+ metros de distancia.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-2xs text-[11px] font-bold flex items-center gap-2">
+              <span className="text-slate-500">Muestra Báscula:</span>
+              <span className="font-mono font-black text-emerald-800">14,850 kg NETO</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTheme(resolvedTheme === 'light' ? 'night-plant' : 'light')}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-black text-amber-300 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              {resolvedTheme === 'light' ? <Moon size={13} /> : <Sun size={13} />}
+              <span>{resolvedTheme === 'light' ? 'Probar Modo Nocturno' : 'Probar Modo Claro'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
         {/* Settings Form */}

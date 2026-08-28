@@ -5,6 +5,7 @@ export interface Producer {
   balance: number;
   rfc?: string;
   phone?: string;
+  email?: string;
   default_orchard?: string;
 }
 
@@ -206,7 +207,81 @@ export interface SearchApiResponse {
 // ==========================================
 
 export type POSUserRole = 'admin' | 'ventas' | 'almacen' | 'finanzas';
-export type POSTabType = 'ventas' | 'recepciones' | 'inventario' | 'corte_caja' | 'gastos' | 'rentabilidad';
+export type POSTabType = 'ventas' | 'historial' | 'analisis' | 'recepciones' | 'inventario' | 'corte_caja' | 'gastos' | 'rentabilidad';
+
+export interface POSDailySalesPoint {
+  date: string;
+  label: string;
+  dayOfWeek: string;
+  totalRevenue: number;
+  totalBoxes: number;
+  totalKg: number;
+  ticketCount: number;
+  cashRevenue: number;
+  bankRevenue: number;
+  creditRevenue: number;
+  avgTicketValue: number;
+}
+
+export interface POSTopProductItem {
+  id: string;
+  name: string;
+  calibre: string;
+  itemType: 'caja' | 'granel';
+  boxesSold: number;
+  kgSold: number;
+  revenue: number;
+  orderCount: number;
+  avgPrice: number;
+  volumePercent: number;
+  revenuePercent: number;
+  color?: string;
+}
+
+export interface POSCustomerTypeMetric {
+  type: string;
+  label: string;
+  revenue: number;
+  boxes: number;
+  kg: number;
+  count: number;
+  percentage: number;
+}
+
+export interface POSPaymentMethodMetric {
+  method: string;
+  label: string;
+  revenue: number;
+  count: number;
+  percentage: number;
+}
+
+export interface POSHourlySalesMetric {
+  hour: string;
+  label: string;
+  revenue: number;
+  boxes: number;
+  tickets: number;
+}
+
+export interface POSAnalyticsData {
+  dailySales: POSDailySalesPoint[];
+  topProducts: POSTopProductItem[];
+  customerTypes: POSCustomerTypeMetric[];
+  paymentMethods: POSPaymentMethodMetric[];
+  hourlySales: POSHourlySalesMetric[];
+  summary: {
+    totalRevenue: number;
+    totalBoxes: number;
+    totalKg: number;
+    totalTickets: number;
+    avgTicket: number;
+    peakDay: { date: string; label: string; boxes: number; revenue: number };
+    topProduct: { name: string; boxes: number; revenue: number; share: number };
+    avgBoxesPerDay: number;
+    avgRevenuePerDay: number;
+  };
+}
 
 export interface POSTransferItem {
   presentation_id: string;
@@ -261,6 +336,8 @@ export interface POSInventoryItem {
   calibre: string;
   quality: string;
   lot_code: string;
+  barcode?: string;
+  sku?: string;
   boxes_stock: number;
   kg_per_box: number;
   kg_stock: number;
@@ -281,12 +358,20 @@ export interface POSCartItem {
   item_type: 'caja' | 'granel';
   calibre: string;
   lot_code: string;
+  barcode?: string;
   qty: number;
   unit_price: number;
   subtotal: number;
   cost_unit_kg: number;
   kg_total: number;
   min_price_per_unit: number;
+  // Item-level discounts
+  discount_type?: 'none' | 'percent' | 'amount';
+  discount_value?: number;
+  discount_amount?: number;
+  discount_reason?: string;
+  discount_authorized_by?: string;
+  original_price?: number;
 }
 
 export interface POSSale {
@@ -298,8 +383,11 @@ export interface POSSale {
   customer_rfc?: string;
   items_json: string;
   subtotal: number;
+  discount_type?: 'none' | 'percent' | 'amount';
   discount_percent: number;
   discount_amount: number;
+  discount_reason?: string;
+  discount_authorized_by?: string;
   tax_amount: number;
   total: number;
   payment_method: 'Efectivo' | 'Tarjeta' | 'Transferencia' | 'Mixto' | 'Credito';
@@ -373,4 +461,129 @@ export interface POSProfitabilityData {
   salesByCalibre: Record<string, { revenue: number; kg: number; cost: number; profit: number }>;
   expensesByCategory: Record<string, number>;
 }
+
+export interface SalesReportFilter {
+  period: '7d' | '30d' | 'this_month' | 'last_month' | 'custom';
+  startDate?: string;
+  endDate?: string;
+  paymentMethod?: string;
+  customerType?: string;
+  search?: string;
+}
+
+export interface SalesReportData {
+  period?: string;
+  periodLabel: string;
+  startDate?: string;
+  endDate?: string;
+  generatedDate: string;
+  generatedBy?: string;
+  totalRevenue: number;
+  totalKgSold: number;
+  totalBoxesSold: number;
+  totalTickets: number;
+  avgTicketValue: number;
+  totalDiscounts: number;
+  summary?: {
+    totalRevenue: number;
+    totalKg: number;
+    totalBoxes: number;
+    totalTransactions: number;
+    avgTicket: number;
+    totalDiscounts: number;
+    cashRevenue: number;
+    bankRevenue: number;
+    cardRevenue: number;
+    creditRevenue: number;
+  };
+  dailySales: {
+    date: string;
+    label: string;
+    dayOfWeek?: string;
+    revenue?: number;
+    totalAmount?: number;
+    totalKg: number;
+    totalBoxes: number;
+    ticketCount?: number;
+    transactionsCount?: number;
+    avgTicket: number;
+    discountsGiven?: number;
+    cashAmount?: number;
+    transferAmount?: number;
+    cardAmount?: number;
+    creditAmount?: number;
+  }[];
+  salesList?: POSSale[];
+  topProducts: {
+    name: string;
+    calibre?: string;
+    itemType?: string;
+    boxesSold: number;
+    kgSold: number;
+    revenue: number;
+    share?: number;
+    volumePercent: number;
+  }[];
+  paymentMethods: {
+    method: string;
+    amount: number;
+    count: number;
+    percentage: number;
+  }[];
+  customerTypes: {
+    type: string;
+    label: string;
+    revenue: number;
+    boxes: number;
+    kg: number;
+    count: number;
+    percentage: number;
+  }[];
+}
+
+export interface MonthlyBalanceData {
+  monthName: string;
+  year: number;
+  periodLabel: string;
+  folio: string;
+  generatedDate: string;
+  generatedBy?: string;
+  // Income (Ingresos)
+  citrusSalesRevenue: number; // Ventas de fruta / mostrador / mayoristas
+  scaleServicesRevenue: number; // Servicios de pesaje báscula a terceros
+  subproductsRevenue: number; // Merma / Molino / Subproductos
+  totalIncome: number;
+  
+  // Cost of Goods Sold (Costo de Materia Prima)
+  fruitAcquisitionCost: number; // Liquidaciones de fruta pagadas a productores
+  totalFruitKgPurchased: number;
+  avgFruitCostPerKg: number;
+  totalGrossProfit: number; // Ingresos Totales - Costo Fruta
+  grossMarginPercent: number;
+
+  // Operating Expenses (Gastos de Operación)
+  maneuverAndTolvaExpenses: number; // Maniobra y descarga ($0.40/kg)
+  localAndFreightExpenses: number; // Combustible, Fletes y Transporte
+  payrollAndStaffExpenses: number; // Nómina operativa y alimentos
+  suppliesAndPackagingExpenses: number; // Insumos, Cajas, Tarimas
+  maintenanceAndUtilitiesExpenses: number; // Energía cámaras frías, mantenimiento
+  otherExpenses: number;
+  totalOperatingExpenses: number;
+
+  // Net Operating Income (Utilidad Neta de Operación)
+  netOperatingIncome: number;
+  netMarginPercent: number;
+
+  // Working Capital & Balance Sheet Reconciliation
+  producersPayablesBalance: number; // Cuentas por pagar a productores
+  cashInHandAndBank: number; // Saldo disponible en caja y bancos
+  inventoryValuation: number; // Valoración de existencias en frío/piso
+  
+  // Detailed breakdowns
+  settlementsBreakdown?: Settlement[];
+  expensesBreakdown?: POSLocalExpense[];
+  batchesCount?: number;
+  producersCount?: number;
+}
+
 

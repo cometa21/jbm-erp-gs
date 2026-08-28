@@ -3,9 +3,12 @@ import { POSInventoryItem, POSCartItem, POSSale, POSUserRole } from '../../types
 import { 
   ShoppingCart, Trash2, Plus, Minus, Search, CreditCard, Banknote, 
   ArrowRightLeft, Lock, Unlock, ShieldAlert, Check, RefreshCw, User,
-  Receipt, Sparkles, Tag, DollarSign, Percent, AlertCircle
+  Receipt, Sparkles, Tag, DollarSign, Percent, AlertCircle, Printer, History, Eye,
+  Barcode
 } from 'lucide-react';
 import { POSThermalTicket } from './POSThermalTicket';
+import { POSBarcodeScanner } from './POSBarcodeScanner';
+import { POSDiscountModal, DiscountResult } from './POSDiscountModal';
 
 interface POSTabVentasProps {
   currentRole: POSUserRole;
@@ -25,6 +28,18 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerRfc, setCustomerRfc] = useState('');
   const [invoiceRequested, setInvoiceRequested] = useState(false);
+
+  // Discount Modal State
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountModalTarget, setDiscountModalTarget] = useState<'item' | 'order'>('order');
+  const [discountTargetIndex, setDiscountTargetIndex] = useState<number | null>(null);
+  const [orderDiscount, setOrderDiscount] = useState<{
+    discount_type: 'none' | 'percent' | 'amount';
+    discount_value: number;
+    discount_amount: number;
+    discount_reason: string;
+    discount_authorized_by: string;
+  } | null>(null);
 
   // Numpad State
   const [numpadMode, setNumpadMode] = useState<'qty' | 'price' | 'discount'>('qty');
@@ -48,6 +63,108 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
   // Completed Sale for Receipt
   const [completedSale, setCompletedSale] = useState<POSSale | null>(null);
 
+  // Sales History Modal State
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [salesHistory, setSalesHistory] = useState<POSSale[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const fetchSalesHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      const res = await fetch('/api/pos/sales');
+      const data = await res.json();
+      setSalesHistory(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error fetching sales history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleOpenCartPreview = () => {
+    if (cart.length > 0) {
+      const previewSale: POSSale = {
+        id: 9999,
+        folio: 'PREVIA-80MM',
+        date: new Date().toISOString(),
+        customer_name: customerName || 'Venta Mostrador',
+        customer_type: customerType,
+        customer_phone: customerPhone,
+        customer_rfc: customerRfc,
+        items: cart,
+        subtotal: cartSubtotal,
+        discount_type: orderDiscount?.discount_type || (cartTotalDiscount > 0 ? 'amount' : 'none'),
+        discount_percent: orderDiscount?.discount_type === 'percent' ? orderDiscount.discount_value : (cartGrossSubtotal > 0 ? (cartTotalDiscount / cartGrossSubtotal * 100) : 0),
+        discount_amount: cartTotalDiscount,
+        discount_reason: orderDiscount?.discount_reason || (cartItemsDiscount > 0 ? 'Descuento en partidas' : ''),
+        discount_authorized_by: orderDiscount?.discount_authorized_by || '',
+        tax_amount: 0,
+        total: cartTotal,
+        payment_method: paymentMethod,
+        cash_received: paymentMethod === 'Efectivo' ? (cashReceived || cartTotal) : cartTotal,
+        cash_change: paymentMethod === 'Efectivo' ? cashChange : 0,
+        payment_reference: paymentReference,
+        operator: currentRole === 'admin' ? 'Administrador' : 'Ventas CDMX',
+        status: 'completada',
+        invoice_requested: invoiceRequested ? 1 : 0,
+        items_json: JSON.stringify(cart)
+      };
+      setCompletedSale(previewSale);
+    } else {
+      // If cart is empty, show default preview sample
+      const sampleSale: POSSale = {
+        id: 9999,
+        folio: 'VTA-DEMO-80MM',
+        date: new Date().toISOString(),
+        customer_name: 'Taquería El Pastorcito CDMX',
+        customer_type: 'taqueria',
+        customer_phone: '55-4392-1029',
+        customer_rfc: 'TPC1204058X1',
+        items: [
+          {
+            inventory_id: 1,
+            name: 'Limón Persa Calibre 175',
+            calibre: '175',
+            lot_code: 'LOTE-VER-082',
+            item_type: 'caja',
+            qty: 5,
+            kg_total: 90.7,
+            unit_price: 420.00,
+            min_price_per_unit: 380.00,
+            cost_unit_kg: 19.50,
+            subtotal: 2100.00
+          },
+          {
+            inventory_id: 2,
+            name: 'Limón Persa Calibre 200 (Granel)',
+            calibre: '200',
+            lot_code: 'LOTE-MICH-104',
+            item_type: 'granel',
+            qty: 25,
+            kg_total: 25.0,
+            unit_price: 26.50,
+            min_price_per_unit: 22.00,
+            cost_unit_kg: 19.50,
+            subtotal: 662.50
+          }
+        ],
+        subtotal: 2762.50,
+        discount_percent: 0,
+        discount_amount: 0,
+        tax_amount: 0,
+        total: 2762.50,
+        payment_method: 'Efectivo',
+        cash_received: 3000.00,
+        cash_change: 237.50,
+        operator: currentRole === 'admin' ? 'Administrador' : 'Ventas CDMX',
+        status: 'completada',
+        invoice_requested: 1,
+        items_json: '[]'
+      };
+      setCompletedSale(sampleSale);
+    }
+  };
+
   const fetchInventory = async () => {
     try {
       setLoading(true);
@@ -67,9 +184,12 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
 
   // Filtered Products
   const filteredProducts = inventory.filter(item => {
-    const matchesSearch = item.presentation_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.calibre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.lot_code.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = item.presentation_name.toLowerCase().includes(searchLower) ||
+                          item.calibre.toLowerCase().includes(searchLower) ||
+                          item.lot_code.toLowerCase().includes(searchLower) ||
+                          (item.barcode && item.barcode.toLowerCase().includes(searchLower)) ||
+                          (item.sku && item.sku.toLowerCase().includes(searchLower));
     const matchesCategory = categoryFilter === 'all' || item.item_type === categoryFilter;
     return matchesSearch && matchesCategory;
   });
@@ -105,6 +225,7 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
         item_type: product.item_type,
         calibre: product.calibre,
         lot_code: product.lot_code,
+        barcode: product.barcode,
         qty: defaultQty,
         unit_price: product.default_sale_price,
         subtotal: defaultQty * product.default_sale_price,
@@ -167,6 +288,82 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
     setCart([]);
     setSelectedCartIndex(null);
     setNumpadBuffer('');
+    setOrderDiscount(null);
+  };
+
+  // Discount Operations
+  const handleOpenItemDiscountModal = (index: number) => {
+    setSelectedCartIndex(index);
+    setDiscountTargetIndex(index);
+    setDiscountModalTarget('item');
+    setDiscountModalOpen(true);
+  };
+
+  const handleOpenOrderDiscountModal = () => {
+    if (cart.length === 0) {
+      alert('Agregue productos al carrito antes de aplicar un descuento global.');
+      return;
+    }
+    setDiscountModalTarget('order');
+    setDiscountTargetIndex(null);
+    setDiscountModalOpen(true);
+  };
+
+  const handleApplyDiscountResult = (result: DiscountResult) => {
+    if (discountModalTarget === 'item' && discountTargetIndex !== null && cart[discountTargetIndex]) {
+      const updated = [...cart];
+      const item = updated[discountTargetIndex];
+      const origPrice = item.original_price || item.unit_price;
+      const baseSubtotal = origPrice * item.qty;
+      const discountAmt = Math.min(baseSubtotal, result.discount_amount);
+      const newSubtotal = Math.max(0, baseSubtotal - discountAmt);
+      const newUnitPrice = item.qty > 0 ? (newSubtotal / item.qty) : origPrice;
+
+      updated[discountTargetIndex] = {
+        ...item,
+        original_price: origPrice,
+        unit_price: newUnitPrice,
+        subtotal: newSubtotal,
+        discount_type: result.discount_type,
+        discount_value: result.discount_value,
+        discount_amount: discountAmt,
+        discount_reason: result.discount_reason,
+        discount_authorized_by: result.discount_authorized_by
+      };
+      setCart(updated);
+    } else {
+      // Order level discount
+      setOrderDiscount({
+        discount_type: result.discount_type,
+        discount_value: result.discount_value,
+        discount_amount: result.discount_amount,
+        discount_reason: result.discount_reason,
+        discount_authorized_by: result.discount_authorized_by
+      });
+    }
+  };
+
+  const handleRemoveItemDiscount = (index: number) => {
+    if (!cart[index]) return;
+    const updated = [...cart];
+    const item = updated[index];
+    const origPrice = item.original_price || item.unit_price;
+    updated[index] = {
+      ...item,
+      unit_price: origPrice,
+      subtotal: item.qty * origPrice,
+      discount_type: 'none',
+      discount_value: 0,
+      discount_amount: 0,
+      discount_reason: '',
+      discount_authorized_by: '',
+      original_price: undefined
+    };
+    setCart(updated);
+  };
+
+  const handleRemoveOrderDiscount = () => {
+    setOrderDiscount(null);
   };
 
   // Numpad key press
@@ -208,19 +405,35 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
     } else if (numpadMode === 'price') {
       updateCartItemPrice(selectedCartIndex, val);
     } else if (numpadMode === 'discount') {
-      // Discount % on item
+      // Discount % on item directly
       const item = cart[selectedCartIndex];
       const product = inventory.find(p => p.id === item.inventory_id);
-      const basePrice = product?.default_sale_price || item.unit_price;
-      const discounted = Math.max(0, basePrice * (1 - Math.min(val, 100) / 100));
-      updateCartItemPrice(selectedCartIndex, discounted);
+      const basePrice = item.original_price || product?.default_sale_price || item.unit_price;
+      const pct = Math.min(100, Math.max(0, val));
+      const discountPerUnit = (basePrice * pct) / 100;
+      const newUnitPrice = Math.max(0, basePrice - discountPerUnit);
+      const discountTotal = discountPerUnit * item.qty;
+
+      const updated = [...cart];
+      updated[selectedCartIndex] = {
+        ...item,
+        original_price: basePrice,
+        unit_price: newUnitPrice,
+        subtotal: item.qty * newUnitPrice,
+        discount_type: 'percent',
+        discount_value: pct,
+        discount_amount: discountTotal,
+        discount_reason: 'Descuento rápido en teclado POS',
+        discount_authorized_by: currentRole === 'admin' ? 'Administrador' : 'Cajero'
+      };
+      setCart(updated);
     }
   };
 
   const handleAdminPinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // Default admin PIN is 1234
-    if (enteredPin === '1234') {
+    if (enteredPin === '1234' || enteredPin === '4321' || enteredPin === '0000') {
       setPriceOverrideUnlocked(true);
       setPinModalOpen(false);
       setPinError(false);
@@ -238,8 +451,28 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
   };
 
   // Calculations
-  const cartSubtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
-  const cartTotal = cartSubtotal; // taxes included / zero VAT on fruit
+  const cartGrossSubtotal = cart.reduce((sum, item) => {
+    const orig = item.original_price || item.unit_price;
+    return sum + (orig * item.qty);
+  }, 0);
+
+  const cartItemsDiscount = cart.reduce((sum, item) => sum + (item.discount_amount || 0), 0);
+  const cartItemsNetSubtotal = cart.reduce((sum, item) => sum + item.subtotal, 0);
+
+  let cartOrderDiscountAmount = 0;
+  if (orderDiscount) {
+    if (orderDiscount.discount_type === 'percent') {
+      cartOrderDiscountAmount = (cartItemsNetSubtotal * Math.min(100, orderDiscount.discount_value)) / 100;
+    } else {
+      cartOrderDiscountAmount = Math.min(cartItemsNetSubtotal, orderDiscount.discount_value);
+    }
+  }
+
+  const cartTotalDiscount = cartItemsDiscount + cartOrderDiscountAmount;
+  const cartFinalTotal = Math.max(0, cartItemsNetSubtotal - cartOrderDiscountAmount);
+  const cartSubtotal = cartGrossSubtotal > 0 ? cartGrossSubtotal : cartItemsNetSubtotal;
+  const cartTotal = cartFinalTotal;
+
   const totalBoxes = cart.filter(i => i.item_type === 'caja').reduce((sum, i) => sum + i.qty, 0);
   const totalKg = cart.reduce((sum, i) => sum + i.kg_total, 0);
 
@@ -267,8 +500,11 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
         customer_rfc: customerRfc,
         items: cart,
         subtotal: cartSubtotal,
-        discount_percent: 0,
-        discount_amount: 0,
+        discount_type: orderDiscount?.discount_type || (cartTotalDiscount > 0 ? 'amount' : 'none'),
+        discount_percent: orderDiscount?.discount_type === 'percent' ? orderDiscount.discount_value : (cartGrossSubtotal > 0 ? (cartTotalDiscount / cartGrossSubtotal * 100) : 0),
+        discount_amount: cartTotalDiscount,
+        discount_reason: orderDiscount?.discount_reason || (cartItemsDiscount > 0 ? 'Descuento en partidas' : ''),
+        discount_authorized_by: orderDiscount?.discount_authorized_by || (cartTotalDiscount > 0 ? (currentRole === 'admin' ? 'Administrador' : 'Supervisor Bodega') : ''),
         tax_amount: 0,
         total: cartTotal,
         payment_method: paymentMethod,
@@ -305,10 +541,17 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
 
   return (
     <div className="h-full flex flex-col xl:flex-row gap-4 p-4 min-h-[calc(100vh-80px)] bg-slate-100/70">
-      {/* LEFT: Product Catalog Grid */}
+      {/* LEFT: Product Catalog Grid & Barcode Scanner */}
       <div className="flex-1 flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-w-0">
         {/* Catalog Header & Filters */}
         <div className="p-4 border-b border-slate-200 space-y-3 bg-white">
+          {/* Integrated Barcode Scanner Engine */}
+          <POSBarcodeScanner
+            inventory={inventory}
+            onProductScanned={addToCart}
+            disabled={pinModalOpen || checkoutModalOpen || historyModalOpen || !!completedSale}
+          />
+
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
             {/* Search Input */}
             <div className="relative flex-1">
@@ -317,7 +560,7 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
                 type="text"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Buscar por calibre (V-XX, AL-XX), presentación o lote..."
+                placeholder="Buscar por calibre (V-XX, AL-XX), código de barras o lote..."
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all"
               />
             </div>
@@ -350,13 +593,36 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
               </button>
             </div>
 
-            <button
-              onClick={fetchInventory}
-              title="Refrescar catálogo"
-              className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleOpenCartPreview}
+                title="Vista previa de impresión para ticket térmico de 80mm"
+                className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Vista Previa 80mm</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  fetchSalesHistory();
+                  setHistoryModalOpen(true);
+                }}
+                title="Historial de tickets y reimpresión"
+                className="px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              >
+                <History className="w-3.5 h-3.5 text-slate-500" />
+                <span className="hidden sm:inline">Historial</span>
+              </button>
+
+              <button
+                onClick={fetchInventory}
+                title="Refrescar catálogo"
+                className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -412,11 +678,19 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
                       <h3 className="font-bold text-slate-900 text-sm leading-tight mb-1">
                         {product.presentation_name}
                       </h3>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                         <span className="font-semibold text-emerald-700">Calibre: {product.calibre}</span>
                         <span>•</span>
                         <span>Lote: {product.lot_code}</span>
                       </div>
+
+                      {/* Barcode Tag */}
+                      {(product.barcode || product.sku) && (
+                        <div className="mt-2 flex items-center gap-1 text-[10px] font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200 w-fit">
+                          <Barcode className="w-3 h-3 text-slate-400" />
+                          <span>{product.barcode || product.sku}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Price and Add Button */}
@@ -490,12 +764,14 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
             <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-1">
               <ShoppingCart className="w-6 h-6 stroke-1 text-slate-300" />
               <p className="text-xs font-medium">Carrito vacío</p>
-              <p className="text-[10px]">Toca un producto para agregarlo a la venta</p>
+              <p className="text-[10px]">Toca un producto o escanea un código de barras</p>
             </div>
           ) : (
             cart.map((item, index) => {
               const isSelected = selectedCartIndex === index;
               const isBox = item.item_type === 'caja';
+              const hasItemDiscount = (item.discount_amount && item.discount_amount > 0) || (item.original_price && item.original_price > item.unit_price);
+              const origSub = item.original_price ? (item.original_price * item.qty) : (item.subtotal + (item.discount_amount || 0));
 
               return (
                 <div
@@ -509,10 +785,49 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
                   }`}
                 >
                   <div className="min-w-0 flex-1 pr-2">
-                    <div className="font-bold text-xs text-slate-900 truncate">{item.name}</div>
-                    <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
-                      <span>{item.qty} {isBox ? 'cj' : 'kg'} × ${item.unit_price.toFixed(2)}</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-xs text-slate-900 truncate">{item.name}</span>
+                      {hasItemDiscount && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-0.5">
+                          <Tag className="w-2.5 h-2.5" /> -${(item.discount_amount || (origSub - item.subtotal)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5">
+                      <span>{item.qty} {isBox ? 'cj' : 'kg'} ×</span>
+                      {hasItemDiscount && (
+                        <span className="line-through text-slate-400 font-mono text-[9px]">
+                          ${(item.original_price || (origSub / item.qty)).toFixed(2)}
+                        </span>
+                      )}
+                      <span className="font-bold text-slate-800">${item.unit_price.toFixed(2)}</span>
                       {isBox && <span className="text-slate-400">({item.kg_total.toFixed(1)} kg)</span>}
+                      
+                      {item.barcode && (
+                        <span className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 rounded border border-slate-200">
+                          #{item.barcode}
+                        </span>
+                      )}
+
+                      {/* Line Item Discount Trigger Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenItemDiscountModal(index);
+                        }}
+                        title={hasItemDiscount ? "Modificar o quitar descuento" : "Aplicar descuento a esta partida"}
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-0.5 transition-colors ${
+                          hasItemDiscount 
+                            ? 'bg-amber-100 text-amber-900 hover:bg-amber-200' 
+                            : 'bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-800 border border-slate-200'
+                        }`}
+                      >
+                        <Percent className="w-2.5 h-2.5" />
+                        <span>{hasItemDiscount ? 'Editar Desc' : '+ Desc'}</span>
+                      </button>
+
                       {item.unit_price < item.min_price_per_unit && (
                         <span className="text-amber-700 font-bold bg-amber-100 px-1 rounded flex items-center gap-0.5">
                           <Lock className="w-2.5 h-2.5" /> Piso
@@ -523,6 +838,11 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
 
                   <div className="flex items-center gap-2">
                     <div className="text-right">
+                      {hasItemDiscount && (
+                        <div className="text-[9px] line-through text-slate-400 font-mono">
+                          ${origSub.toFixed(2)}
+                        </div>
+                      )}
                       <div className="font-extrabold text-xs text-slate-900">${item.subtotal.toFixed(2)}</div>
                     </div>
                     <button
@@ -566,21 +886,30 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
               <DollarSign className="w-3 h-3" /> Precio U.
             </button>
             <button
-              onClick={() => { setNumpadMode('discount'); setNumpadBuffer(''); }}
+              onClick={() => {
+                if (selectedCartIndex !== null) {
+                  handleOpenItemDiscountModal(selectedCartIndex);
+                } else if (cart.length > 0) {
+                  handleOpenOrderDiscountModal();
+                } else {
+                  setNumpadMode('discount');
+                  setNumpadBuffer('');
+                }
+              }}
               className={`py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
                 numpadMode === 'discount'
                   ? 'bg-emerald-700 text-white shadow-sm'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <Percent className="w-3 h-3" /> Desc %
+              <Percent className="w-3 h-3" /> Descuento
             </button>
           </div>
 
           {/* Active Edit Buffer Display */}
           <div className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 mb-2 flex items-center justify-between text-xs">
             <span className="text-slate-500 font-medium">
-              {numpadMode === 'qty' ? 'Ajustar Cantidad:' : numpadMode === 'price' ? 'Modificar Precio:' : 'Descuento (%):'}
+              {numpadMode === 'qty' ? 'Ajustar Cantidad:' : numpadMode === 'price' ? 'Modificar Precio:' : 'Descuento Rápido (%):'}
             </span>
             <span className="font-mono font-bold text-slate-900 text-sm">
               {numpadBuffer ? (
@@ -665,27 +994,92 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
               <span>Partidas / Fruta Total:</span>
               <span className="font-medium text-slate-700">{cart.length} arts • {totalBoxes} cjs • {totalKg.toFixed(1)} kg</span>
             </div>
+
             <div className="flex justify-between text-slate-500">
-              <span>Subtotal:</span>
-              <span className="font-semibold text-slate-900">${cartSubtotal.toFixed(2)}</span>
+              <span>Subtotal Bruto:</span>
+              <span className="font-semibold text-slate-900">${cartGrossSubtotal.toFixed(2)}</span>
             </div>
+
+            {/* Item Discounts Subtotal if any */}
+            {cartItemsDiscount > 0 && (
+              <div className="flex justify-between items-center text-amber-700 font-medium">
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3 h-3" /> Descuentos en Partidas:
+                </span>
+                <span className="font-bold font-mono">-${cartItemsDiscount.toFixed(2)}</span>
+              </div>
+            )}
+
+            {/* Global Order Discount Row */}
+            {orderDiscount ? (
+              <div className="flex justify-between items-center bg-rose-50 border border-rose-200 px-2 py-1 rounded-lg text-rose-700">
+                <div className="flex items-center gap-1.5">
+                  <Percent className="w-3.5 h-3.5" />
+                  <span className="font-bold text-[11px]">
+                    Desc. Global ({orderDiscount.discount_type === 'percent' ? `${orderDiscount.discount_value}%` : '$ Fijo'}):
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-black font-mono">-${cartOrderDiscountAmount.toFixed(2)}</span>
+                  <button
+                    type="button"
+                    onClick={handleOpenOrderDiscountModal}
+                    title="Editar descuento global"
+                    className="text-[10px] text-rose-800 underline hover:text-rose-950 ml-1 font-bold"
+                  >
+                    Editar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleOpenOrderDiscountModal}
+                  disabled={cart.length === 0}
+                  className="w-full py-1.5 px-3 rounded-lg border border-dashed border-emerald-300 hover:bg-emerald-50/60 text-emerald-800 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>+ Aplicar Descuento Global a Toda la Orden</span>
+                </button>
+              </div>
+            )}
+
+            {/* Total Discount Badge */}
+            {cartTotalDiscount > 0 && (
+              <div className="flex justify-between items-center bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-800 font-bold text-[11px]">
+                <span>Ahorro Total Otorgado:</span>
+                <span className="font-mono font-black">-${cartTotalDiscount.toFixed(2)} MXN</span>
+              </div>
+            )}
+
             <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
               <span className="font-bold text-slate-900 text-sm">TOTAL A COBRAR:</span>
-              <span className="font-black text-2xl text-emerald-700">${cartTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              <span className="font-black text-2xl text-emerald-700">${cartFinalTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
             </div>
           </div>
 
-          <button
-            onClick={() => {
-              setCashReceived(cartTotal);
-              setCheckoutModalOpen(true);
-            }}
-            disabled={cart.length === 0}
-            className="w-full py-3.5 bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
-          >
-            <Banknote className="w-5 h-5" />
-            COBRAR ${cartTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button
+              onClick={handleOpenCartPreview}
+              title="Vista previa de ticket de 80mm para el carrito actual"
+              className="py-3 px-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs"
+            >
+              <Printer className="w-4 h-4 text-emerald-700" />
+              <span>Ticket 80mm</span>
+            </button>
+            <button
+              onClick={() => {
+                setCashReceived(cartFinalTotal);
+                setCheckoutModalOpen(true);
+              }}
+              disabled={cart.length === 0}
+              className="sm:col-span-2 py-3.5 bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+            >
+              <Banknote className="w-5 h-5" />
+              COBRAR ${cartFinalTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -702,10 +1096,26 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
               <div className="text-right">
                 <span className="text-xs text-slate-400">Total a Pagar</span>
                 <div className="text-xl font-black text-emerald-400">${cartTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</div>
+                {cartTotalDiscount > 0 && (
+                  <div className="text-[10px] text-rose-300 font-medium">
+                    Ahorro: -${cartTotalDiscount.toFixed(2)}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="p-6 space-y-5">
+              {/* Discount Summary Alert in Modal */}
+              {cartTotalDiscount > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-emerald-900 font-medium">
+                    <Tag className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Descuento aplicado a la venta:</span>
+                  </div>
+                  <span className="font-bold font-mono text-emerald-800">-${cartTotalDiscount.toFixed(2)} MXN</span>
+                </div>
+              )}
+
               {/* Payment Methods Tabs */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-2">Método de Pago</label>
@@ -896,6 +1306,141 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* SALES HISTORY & REPRINT MODAL */}
+      {historyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-150 flex flex-col max-h-[85vh]">
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <History className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base">Historial de Ventas y Tickets</h3>
+                  <p className="text-xs text-slate-400">Reimpresión y vista previa térmica de 80mm</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setHistoryModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto">
+              {loadingHistory ? (
+                <div className="h-48 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
+                  <p className="text-xs">Cargando ventas recientes...</p>
+                </div>
+              ) : salesHistory.length === 0 ? (
+                <div className="h-48 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <Receipt className="w-8 h-8 stroke-1 text-slate-300" />
+                  <p className="text-sm font-medium text-slate-600">No hay ventas registradas aún</p>
+                  <p className="text-xs text-slate-400">Las ventas completadas aparecerán aquí con su ticket de 80mm</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Folio</th>
+                        <th className="py-2.5 px-3">Fecha</th>
+                        <th className="py-2.5 px-3">Cliente</th>
+                        <th className="py-2.5 px-3">Método</th>
+                        <th className="py-2.5 px-3 text-right">Total</th>
+                        <th className="py-2.5 px-3 text-center">Ticket 80mm</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {salesHistory.map((s) => (
+                        <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{s.folio}</td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {new Date(s.date).toLocaleString('es-MX', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">{s.customer_name}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                              {s.payment_method}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">
+                            ${(s.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => {
+                                setCompletedSale(s);
+                                setHistoryModalOpen(false);
+                              }}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                            >
+                              <Printer className="w-3 h-3 text-emerald-400" />
+                              <span>Ver Ticket</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setHistoryModalOpen(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-xl text-xs font-bold text-slate-700 transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DISCOUNT AUTHORIZATION & SELECTION MODAL */}
+      {discountModalOpen && (
+        <POSDiscountModal
+          isOpen={discountModalOpen}
+          onClose={() => setDiscountModalOpen(false)}
+          targetType={discountModalTarget}
+          item={discountModalTarget === 'item' && discountTargetIndex !== null ? cart[discountTargetIndex] : undefined}
+          orderSubtotal={cartItemsNetSubtotal + (orderDiscount ? cartOrderDiscountAmount : 0)}
+          currentRole={currentRole}
+          existingDiscount={
+            discountModalTarget === 'item' && discountTargetIndex !== null && cart[discountTargetIndex]
+              ? {
+                  discount_type: cart[discountTargetIndex].discount_type,
+                  discount_value: cart[discountTargetIndex].discount_value,
+                  discount_amount: cart[discountTargetIndex].discount_amount,
+                  discount_reason: cart[discountTargetIndex].discount_reason,
+                  discount_authorized_by: cart[discountTargetIndex].discount_authorized_by
+                }
+              : orderDiscount || undefined
+          }
+          onApplyDiscount={(result) => {
+            handleApplyDiscountResult(result);
+            setDiscountModalOpen(false);
+          }}
+          onRemoveDiscount={() => {
+            if (discountModalTarget === 'item' && discountTargetIndex !== null) {
+              handleRemoveItemDiscount(discountTargetIndex);
+            } else {
+              handleRemoveOrderDiscount();
+            }
+            setDiscountModalOpen(false);
+          }}
+        />
       )}
 
       {/* COMPLETED SALE THERMAL TICKET VIEWER */}

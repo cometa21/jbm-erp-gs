@@ -458,8 +458,8 @@ export const POSTabCorteCaja: React.FC<POSTabCorteCajaProps> = ({ currentRole })
 
       {/* CLOSED CUT VOUCHER MODAL */}
       {closedCutResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 border border-slate-200 space-y-4 animate-in fade-in">
+        <div id="print-modal-container" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 border border-slate-200 space-y-4 animate-in fade-in thermal-receipt">
             <div className="text-center pb-3 border-b border-dashed border-slate-300">
               <h3 className="font-bold text-base text-slate-900">COMPROBANTE DE CORTE DE CAJA</h3>
               <p className="text-xs text-slate-500">JBM Cítricos - Bodega CDMX</p>
@@ -483,7 +483,7 @@ export const POSTabCorteCaja: React.FC<POSTabCorteCajaProps> = ({ currentRole })
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t">
+            <div className="flex justify-end gap-2 pt-3 border-t no-print">
               <button
                 onClick={() => window.print()}
                 className="px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"

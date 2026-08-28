@@ -17,31 +17,34 @@ import { Logistics } from './components/Logistics';
 import { Finances } from './components/Finances';
 import { Documents } from './components/Documents';
 import { SettingsPage } from './components/SettingsPage';
+import { ThemeProvider } from './context/ThemeContext';
 
 export default function App() {
   return (
-    <Router>
-      <div className="flex min-h-screen bg-slate-50">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-hidden">
-          <TopNavbar />
-          <main className="flex-1 overflow-y-auto">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/recepcion" element={<Reception />} />
-              <Route path="/produccion" element={<Production />} />
-              <Route path="/camara" element={<ColdStorage />} />
-              <Route path="/ventas" element={<POS />} />
-              <Route path="/logistica" element={<Logistics />} />
-              <Route path="/finanzas" element={<Finances />} />
-              <Route path="/documentos" element={<Documents />} />
-              <Route path="/insumos" element={<Supplies />} />
-              <Route path="/config" element={<SettingsPage />} />
-            </Routes>
-          </main>
+    <ThemeProvider>
+      <Router>
+        <div className="flex min-h-screen bg-slate-50 transition-colors duration-200">
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-hidden">
+            <TopNavbar />
+            <main className="flex-1 overflow-y-auto">
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/recepcion" element={<Reception />} />
+                <Route path="/produccion" element={<Production />} />
+                <Route path="/camara" element={<ColdStorage />} />
+                <Route path="/ventas" element={<POS />} />
+                <Route path="/logistica" element={<Logistics />} />
+                <Route path="/finanzas" element={<Finances />} />
+                <Route path="/documentos" element={<Documents />} />
+                <Route path="/insumos" element={<Supplies />} />
+                <Route path="/config" element={<SettingsPage />} />
+              </Routes>
+            </main>
+          </div>
         </div>
-      </div>
-    </Router>
+      </Router>
+    </ThemeProvider>
   );
 }
 

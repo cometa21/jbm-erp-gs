@@ -3,9 +3,11 @@ import { POSTabType, POSUserRole } from '../../types';
 import { 
   ShoppingCart, Truck, Package, Calculator, Receipt, TrendingUp, 
   ArrowLeft, Shield, User, Building2, Clock, CheckCircle2, ChevronRight,
-  Sparkles, Store, Layers
+  Sparkles, Store, Layers, History, BarChart3
 } from 'lucide-react';
 import { POSTabVentas } from './POSTabVentas';
+import { POSTabHistorial } from './POSTabHistorial';
+import { POSTabAnalisis } from './POSTabAnalisis';
 import { POSTabRecepciones } from './POSTabRecepciones';
 import { POSTabInventario } from './POSTabInventario';
 import { POSTabCorteCaja } from './POSTabCorteCaja';
@@ -31,6 +33,18 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Punto de Venta',
     icon: ShoppingCart,
     roles: ['admin', 'ventas']
+  },
+  {
+    id: 'historial',
+    label: 'Historial de Ventas',
+    icon: History,
+    roles: ['admin', 'ventas', 'finanzas']
+  },
+  {
+    id: 'analisis',
+    label: 'Análisis de Ventas',
+    icon: BarChart3,
+    roles: ['admin', 'ventas', 'finanzas']
   },
   {
     id: 'recepciones',
@@ -260,6 +274,13 @@ export const POSLayout: React.FC<POSLayoutProps> = ({ onBackToERP }) => {
         {/* ACTIVE TAB RENDERER */}
         <main className="flex-1 overflow-y-auto bg-slate-100/70">
           {activeTab === 'ventas' && <POSTabVentas currentRole={currentRole} />}
+          {activeTab === 'historial' && (
+            <POSTabHistorial 
+              currentRole={currentRole} 
+              onNavigateToPOS={() => setActiveTab('ventas')} 
+            />
+          )}
+          {activeTab === 'analisis' && <POSTabAnalisis currentRole={currentRole} />}
           {activeTab === 'recepciones' && <POSTabRecepciones currentRole={currentRole} />}
           {activeTab === 'inventario' && <POSTabInventario currentRole={currentRole} />}
           {activeTab === 'corte_caja' && <POSTabCorteCaja currentRole={currentRole} />}

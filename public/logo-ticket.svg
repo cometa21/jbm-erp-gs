@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 480" width="600" height="480">
+  <defs>
+    <!-- Grayscale / Monochrome thermal printing palette -->
+    <linearGradient id="monoLeaf1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#777777" />
+      <stop offset="100%" stop-color="#444444" />
+    </linearGradient>
+
+    <linearGradient id="monoLeaf2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#999999" />
+      <stop offset="100%" stop-color="#555555" />
+    </linearGradient>
+
+    <linearGradient id="monoDome" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#555555" />
+      <stop offset="100%" stop-color="#333333" />
+    </linearGradient>
+
+    <linearGradient id="monoPulp" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#888888" />
+      <stop offset="100%" stop-color="#666666" />
+    </linearGradient>
+  </defs>
+
+  <!-- Top Leaves -->
+  <g transform="translate(0, 0)">
+    <!-- Left Leaf -->
+    <path d="M285 85 C265 48 285 10 325 5 C345 35 345 75 320 90 C305 98 290 95 285 85 Z" fill="url(#monoLeaf1)" />
+    <path d="M295 78 Q315 42 322 10" stroke="#222222" stroke-width="3" stroke-linecap="round" fill="none" />
+
+    <!-- Right Leaf -->
+    <path d="M332 65 C352 30 388 38 402 62 C382 82 352 82 332 65 Z" fill="url(#monoLeaf2)" />
+    <path d="M340 65 Q368 54 395 58" stroke="#222222" stroke-width="2.5" stroke-linecap="round" fill="none" />
+
+    <!-- Stem -->
+    <path d="M312 95 C314 103 310 110 306 118" stroke="#222222" stroke-width="5" stroke-linecap="round" fill="none" />
+  </g>
+
+  <!-- Lime Slice Outer Dome -->
+  <path d="M125 240 C125 125 200 85 300 85 C400 85 475 125 475 240 Z" fill="url(#monoDome)" />
+
+  <!-- Inner Pulp Dome -->
+  <path d="M160 240 C160 160 215 115 300 115 C385 115 440 160 440 240 Z" fill="url(#monoPulp)" />
+
+  <!-- Vesicles Pattern in Light Gray -->
+  <g opacity="0.65" stroke="#333333" stroke-width="2" fill="#B0B0B0">
+    <ellipse cx="300" cy="155" rx="14" ry="22" transform="rotate(-5 300 155)" />
+    <ellipse cx="265" cy="170" rx="13" ry="20" transform="rotate(-25 265 170)" />
+    <ellipse cx="335" cy="170" rx="13" ry="20" transform="rotate(25 335 170)" />
+
+    <ellipse cx="230" cy="198" rx="14" ry="22" transform="rotate(-42 230 198)" />
+    <ellipse cx="270" cy="202" rx="13" ry="21" transform="rotate(-15 270 202)" />
+    <ellipse cx="300" cy="200" rx="15" ry="23" />
+    <ellipse cx="330" cy="202" rx="13" ry="21" transform="rotate(15 330 202)" />
+    <ellipse cx="370" cy="198" rx="14" ry="22" transform="rotate(42 370 198)" />
+
+    <ellipse cx="205" cy="230" rx="13" ry="16" transform="rotate(-62 205 230)" />
+    <ellipse cx="248" cy="230" rx="14" ry="17" transform="rotate(-20 248 230)" />
+    <ellipse cx="300" cy="232" rx="16" ry="17" />
+    <ellipse cx="352" cy="230" rx="14" ry="17" transform="rotate(20 352 230)" />
+    <ellipse cx="395" cy="230" rx="13" ry="16" transform="rotate(62 395 230)" />
+  </g>
+
+  <!-- JBM Letters (Bold Dark Gray / Black) -->
+  <g transform="translate(0, 0)">
+    <text x="300" y="375" text-anchor="middle" font-family="'Arial Black', 'Impact', 'Montserrat', sans-serif" font-size="160" font-weight="900" letter-spacing="6" fill="#1A1A1A" stroke="#000000" stroke-width="4" paint-order="stroke fill">
+      JBM
+    </text>
+
+    <!-- Trademark Symbol (R) -->
+    <g transform="translate(485, 260)">
+      <circle cx="14" cy="14" r="12" stroke="#222222" stroke-width="2.5" fill="none" />
+      <text x="14" y="19" text-anchor="middle" font-size="15" font-weight="bold" fill="#222222" font-family="Arial">R</text>
+    </g>
+  </g>
+
+  <!-- Subtitle 1: CÍTRICOS PREMIUM -->
+  <text x="300" y="425" text-anchor="middle" font-family="'Arial Rounded MT Bold', 'Arial Black', sans-serif" font-size="38" font-weight="800" letter-spacing="4" fill="#333333">
+    CÍTRICOS PREMIUM
+  </text>
+
+  <!-- Subtitle 2: LIMONES BARRAGAN -->
+  <text x="300" y="468" text-anchor="middle" font-family="'Arial Black', 'Montserrat', sans-serif" font-size="44" font-weight="900" letter-spacing="3" fill="#111111">
+    LIMONES BARRAGAN
+  </text>
+</svg>

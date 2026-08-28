@@ -12,17 +12,21 @@ import {
   ShieldCheck, 
   Building2, 
   Calendar, 
-  AlertTriangle 
+  AlertTriangle,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { useNavigate } from 'react-router-dom';
 import { useSuppliesNotificationMonitor } from '../hooks/useSuppliesNotificationMonitor';
 import { SuppliesNotificationModal } from './SuppliesNotificationModal';
+import { useTheme } from '../context/ThemeContext';
 
 export function TopNavbar() {
   const navigate = useNavigate();
   const [currentDateTime, setCurrentDateTime] = React.useState<string>('');
   const [isNotificationModalOpen, setIsNotificationModalOpen] = React.useState(false);
+  const { theme, resolvedTheme, toggleTheme } = useTheme();
 
   const {
     permission,
@@ -75,6 +79,42 @@ export function TopNavbar() {
                 </span>
               </button>
             )}
+
+            {/* Quick Theme Switcher Button (Diurno / Nocturno Planta) */}
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                resolvedTheme === 'night-plant'
+                  ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/80 hover:bg-emerald-900 shadow-2xs'
+                  : resolvedTheme === 'dark'
+                  ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700/80 hover:bg-indigo-900 shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+              title={
+                resolvedTheme === 'night-plant'
+                  ? 'Modo: Jornada Nocturna (Alto Contraste Planta) - Clic para cambiar'
+                  : resolvedTheme === 'dark'
+                  ? 'Modo: Oscuro Balanceado - Clic para cambiar'
+                  : 'Modo: Claro (Diurno) - Clic para cambiar a Jornada Nocturna'
+              }
+            >
+              {resolvedTheme === 'night-plant' ? (
+                <>
+                  <Moon className="w-4 h-4 text-emerald-400" />
+                  <span className="hidden xl:inline text-[11px] font-black text-emerald-300">Nocturno Planta</span>
+                </>
+              ) : resolvedTheme === 'dark' ? (
+                <>
+                  <Moon className="w-4 h-4 text-indigo-300" />
+                  <span className="hidden xl:inline text-[11px] font-bold text-indigo-200">Oscuro</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-4 h-4 text-amber-600" />
+                  <span className="hidden xl:inline text-[11px] font-bold text-slate-700">Diurno</span>
+                </>
+              )}
+            </button>
 
             {/* Notification Center Bell Button */}
             <button

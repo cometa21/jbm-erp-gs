@@ -45,6 +45,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { DashboardStats } from '../types';
 import { Reception7DayTrendCard } from './Reception7DayTrendCard';
 import { DashboardFirestoreSummaryCards } from './DashboardFirestoreSummaryCards';
+import { DailySalesVolumeChart } from './DailySalesVolumeChart';
+import { InventoryLevelsChart } from './InventoryLevelsChart';
 
 interface DailyDataPoint {
   date: string;
@@ -364,6 +366,24 @@ export function Dashboard() {
           data={dailyData} 
           targetCapacityKg={summary?.standardCapacityKgDay || 12000} 
         />
+      </motion.div>
+
+      {/* DYNAMIC SALES VOLUME & COMMERCIAL MOVEMENT CHART (RECHARTS) */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+      >
+        <DailySalesVolumeChart onRefreshParent={fetchAllData} />
+      </motion.div>
+
+      {/* INVENTORY LEVELS & STOCK HEALTH THRESHOLDS CHART (RECHARTS) */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+      >
+        <InventoryLevelsChart onRefreshParent={fetchAllData} />
       </motion.div>
 
       {/* SECTION 1: CHART OF 30-DAY CITRUS RECEPTION VOLUME */}

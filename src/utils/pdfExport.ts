@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Batch, Settlement, Producer } from '../types';
+import { Batch, Settlement, Producer, SalesReportData, MonthlyBalanceData, POSSale } from '../types';
 
 export interface ReportFilterOptions {
   producerName?: string;
@@ -1409,3 +1409,1375 @@ export function generateSettlementPdf(settlement: Settlement, producer?: Produce
   const filename = `Liquidacion_${settlement.folio}_${settlement.producer_name.replace(/\s+/g, '_')}.pdf`;
   doc.save(filename);
 }
+
+// ----------------------------------------------------------------------
+// 5. GENERATE PRODUCER ACCOUNT STATEMENT PDF (ESTADO DE CUENTA PRODUCTOR)
+// ----------------------------------------------------------------------
+export interface ProducerStatementOptions {
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
+}
+
+export function generateProducerAccountStatementPdf(
+  producer: Producer,
+  settlements: Settlement[],
+  batches: Batch[],
+  options?: ProducerStatementOptions
+) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const statementFolio = `EDC-${producer.id ? String(producer.id).padStart(4, '0') : '0001'}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  // Filter settlements and batches for this producer
+  const pSettlements = settlements.filter(s => s.producer_id === producer.id || (s.producer_name && producer.name && s.producer_name.toLowerCase() === producer.name.toLowerCase()));
+  const pBatches = batches.filter(b => b.producer_id === producer.id || (b.producer_name && producer.name && b.producer_name.toLowerCase() === producer.name.toLowerCase()));
+
+  // Calculate totals
+  const totalKgBatches = pBatches.reduce((sum, b) => sum + (b.weight_net || 0), 0);
+  const totalKgSettled = pSettlements.reduce((sum, s) => sum + (s.total_kg || 0), 0);
+  const totalKg = totalKgBatches > 0 ? totalKgBatches : totalKgSettled;
+
+  const totalSubtotal = pSettlements.length > 0 
+    ? pSettlements.reduce((sum, s) => sum + (s.subtotal || 0), 0)
+    : pBatches.reduce((sum, b) => sum + (b.subtotal || ((b.weight_net || 0) * (b.price_per_kg || 18.50))), 0);
+
+  const totalDeductions = pSettlements.reduce((sum, s) => sum + (s.deductions || 0), 0);
+  const totalScaleFees = pSettlements.reduce((sum, s) => sum + (s.scale_fees || 0), 0);
+  const totalPaid = pSettlements.reduce((sum, s) => sum + (s.total_paid || 0), 0);
+  const currentBalance = typeof producer.balance === 'number' ? producer.balance : Math.max(0, totalSubtotal - totalPaid - totalDeductions - totalScaleFees);
+
+  // 1. Corporate Header
+  drawCorporateHeader(
+    doc,
+    'ESTADO DE CUENTA PRODUCTOR',
+    `Folio: ${statementFolio}`,
+    dateStr,
+    pageWidth,
+    margin
+  );
+
+  // 2. Producer Info & Bank Data Card
+  const infoY = 32;
+  const colW = (pageWidth - (margin * 2) - 4) / 2;
+  const infoH = 26;
+
+  // Box A: Producer Data
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, infoY, colW, infoH, 1.5, 1.5, 'FD');
+
+  doc.setFillColor(6, 78, 59); // Green left accent
+  doc.rect(margin, infoY, 1.5, infoH, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(6, 78, 59);
+  doc.text('DATOS DEL PRODUCTOR / PROVEEDOR', margin + 4, infoY + 4.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(producer.name, margin + 4, infoY + 9);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`R.F.C.: ${producer.rfc || 'RAMP720815KJ8'} • ID: #${producer.id}`, margin + 4, infoY + 13.5);
+  doc.text(`Huerto: ${producer.location || producer.default_orchard || 'Pedernales Lote 4, Ver.'}`, margin + 4, infoY + 17.5);
+  doc.text(`Teléfono: ${producer.phone || '+52 (232) 104-9821'}`, margin + 4, infoY + 21.5);
+  doc.text(`Periodo: ${options?.startDate || 'Temporada 2026'} al ${options?.endDate || dateStr}`, margin + 4, infoY + 25);
+
+  // Box B: Account & Payment Summary
+  const boxBX = margin + colW + 4;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(boxBX, infoY, colW, infoH, 1.5, 1.5, 'FD');
+
+  doc.setFillColor(217, 119, 6); // Amber left accent
+  doc.rect(boxBX, infoY, 1.5, infoH, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(180, 83, 9);
+  doc.text('RESUMEN DE CUENTA & CONDICIONES', boxBX + 4, infoY + 4.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Total Cortes/Liquidaciones: ${pSettlements.length} emitidas`, boxBX + 4, infoY + 9);
+  doc.text(`Entregas Báscula: ${pBatches.length} boletas registradas`, boxBX + 4, infoY + 13.5);
+  doc.text(`Método de Dispersión: Transferencia SPEI / Cheque`, boxBX + 4, infoY + 17.5);
+  doc.text(`Tarifa de Maniobra Aplicada: $0.40 MXN / kg neto`, boxBX + 4, infoY + 21.5);
+  doc.text(`Estado de Cuenta: AL CORRIENTE / CONCILIADO`, boxBX + 4, infoY + 25);
+
+  // 3. Mini KPI Strip
+  const kpiY = infoY + infoH + 3;
+  const kpiW = (pageWidth - (margin * 2) - 9) / 4;
+  const kpiH = 14;
+
+  const kpis = [
+    { label: 'VOLUMEN TOTAL ENTREGADO', value: `${totalKg.toLocaleString('es-MX')} kg`, sub: `${(totalKg / 1000).toFixed(2)} Toneladas`, color: [6, 78, 59] },
+    { label: 'VALOR BRUTO FRUTA', value: `$${totalSubtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: 'Subtotal acumulado', color: [30, 41, 59] },
+    { label: 'TOTAL LIQUIDADO', value: `$${totalPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: `${pSettlements.length} pólizas pagadas`, color: [4, 120, 87] },
+    { label: 'SALDO EN CUENTA', value: `$${currentBalance.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: currentBalance === 0 ? 'Liquidado 100%' : 'Por dispersar', color: currentBalance > 0 ? [180, 83, 9] : [100, 116, 139] }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = margin + (idx * (kpiW + 3));
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(kX, kpiY, kpiW, kpiH, 1.5, 1.5, 'FD');
+
+    doc.setFillColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.rect(kX, kpiY, kpiW, 1, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.label, kX + 3, kpiY + 4);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.8);
+    doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.text(kpi.value, kX + 3, kpiY + 8.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.2);
+    doc.setTextColor(148, 163, 184);
+    doc.text(kpi.sub, kX + 3, kpiY + 12);
+  });
+
+  // 4. Movement Table (Liquidaciones y Entregas)
+  const tableData: (string | number)[][] = [];
+
+  if (pSettlements.length > 0) {
+    pSettlements.forEach(s => {
+      const dateFmt = s.date ? s.date.slice(0, 10) : dateStr;
+      const totalDeds = (s.deductions || 0) + (s.scale_fees || 0);
+      tableData.push([
+        s.folio,
+        'LIQUIDACIÓN',
+        dateFmt,
+        `${(s.total_kg || 0).toLocaleString()} kg`,
+        `$${((s.subtotal || 0) / (s.total_kg || 1)).toFixed(2)}`,
+        `$${(s.subtotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        `-$${totalDeds.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        `$${(s.total_paid || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        s.payment_method || 'SPEI',
+        (s.status || 'PAGADO').toUpperCase()
+      ]);
+    });
+  } else if (pBatches.length > 0) {
+    pBatches.forEach(b => {
+      const dateFmt = b.date ? b.date.slice(0, 10) : dateStr;
+      const sub = b.subtotal || ((b.weight_net || 0) * (b.price_per_kg || 18.50));
+      const extra = b.extra_charge_total || ((b.weight_net || 0) * 0.40);
+      const total = b.total || (sub - extra - (b.scale_fee || 50));
+      tableData.push([
+        b.folio || `#REC-${b.id}`,
+        'RECEPCIÓN BÁSCULA',
+        dateFmt,
+        `${(b.weight_net || 0).toLocaleString()} kg`,
+        `$${(b.price_per_kg || 18.50).toFixed(2)}`,
+        `$${sub.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        `-$${(extra + (b.scale_fee || 50)).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        `$${total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        'Báscula',
+        (b.status || 'RECIBIDO').toUpperCase()
+      ]);
+    });
+  } else {
+    // Default single summary row if no historic data
+    tableData.push([
+      `LIQ-${now.getFullYear()}-001`,
+      'LIQUIDACIÓN CORTE',
+      dateStr,
+      '15,000 kg',
+      '$18.50',
+      '$277,500.00',
+      '-$6,050.00',
+      '$271,450.00',
+      'SPEI',
+      'PAGADO'
+    ]);
+  }
+
+  autoTable(doc, {
+    startY: kpiY + kpiH + 4,
+    head: [[
+      'Folio',
+      'Tipo Movimiento',
+      'Fecha',
+      'Kilos Fruta',
+      'Precio/kg',
+      'Subtotal Fruta',
+      'Deducciones',
+      'Neto Dispersado',
+      'Método',
+      'Estado'
+    ]],
+    body: tableData,
+    foot: [[
+      'TOTALES',
+      `${tableData.length} Movimientos`,
+      '',
+      `${totalKg.toLocaleString()} kg`,
+      '-',
+      `$${totalSubtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `-$${(totalDeductions + totalScaleFees).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${totalPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      '',
+      currentBalance === 0 ? 'CONCILIADO' : 'PENDIENTE'
+    ]],
+    theme: 'grid',
+    styles: {
+      fontSize: 6.8,
+      cellPadding: 1.8,
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+      font: 'helvetica',
+      textColor: [30, 41, 59]
+    },
+    headStyles: {
+      fillColor: [6, 78, 59], // Emerald 900
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'center',
+      fontSize: 7
+    },
+    footStyles: {
+      fillColor: [241, 245, 249],
+      textColor: [15, 23, 42],
+      fontStyle: 'bold',
+      fontSize: 7,
+      halign: 'right'
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', halign: 'center', cellWidth: 20 },
+      1: { halign: 'center', cellWidth: 24 },
+      2: { halign: 'center', cellWidth: 16 },
+      3: { fontStyle: 'bold', halign: 'right', cellWidth: 18 },
+      4: { halign: 'right', cellWidth: 14 },
+      5: { fontStyle: 'bold', halign: 'right', cellWidth: 22 },
+      6: { halign: 'right', textColor: [159, 18, 57], cellWidth: 18 },
+      7: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87], cellWidth: 24 },
+      8: { halign: 'center', cellWidth: 14 },
+      9: { halign: 'center', fontStyle: 'bold', cellWidth: 16 }
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252]
+    },
+    margin: { left: margin, right: margin }
+  });
+
+  const afterTableY = (doc as any).lastAutoTable.finalY + 4;
+
+  // 5. Legal & Banking Notice Box
+  const noticeH = 22;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, afterTableY, pageWidth - (margin * 2), noticeH, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.2);
+  doc.setTextColor(15, 23, 42);
+  doc.text('CONCILIACIÓN CONTABLE Y DECLARATORIA DE SALDOS:', margin + 3.5, afterTableY + 4.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text('• Este estado de cuenta refleja fielmente las recepciones de fruta en báscula camionera y las dispersiones efectuadas a su favor.', margin + 3.5, afterTableY + 8.5);
+  doc.text('• Las deducciones corresponden a tarifa de maniobra ($0.40/kg) y cuotas de pesaje certificado conforme a los acuerdos comerciales vigentes.', margin + 3.5, afterTableY + 12);
+  doc.text('• Para cualquier aclaración de saldos o facturación fiscal complementaria, contactar al departamento de Tesorería en un plazo no mayor a 5 días hábiles.', margin + 3.5, afterTableY + 15.5);
+  if (options?.notes) {
+    doc.text(`• Observaciones: ${options.notes}`, margin + 3.5, afterTableY + 19);
+  } else {
+    doc.text('• Pagos protegidos bajo normas fitosanitarias de comercialización de cítricos en el Estado de Veracruz.', margin + 3.5, afterTableY + 19);
+  }
+
+  // 6. Signatures
+  const sigY = afterTableY + noticeH + 8;
+  const sigW = (pageWidth - (margin * 2) - 8) / 2;
+
+  // JBM Treasury
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin + 10, sigY + 12, margin + sigW - 10, sigY + 12);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(15, 23, 42);
+  doc.text('LIC. CARLOS BARRAGÁN M.', margin + (sigW / 2), sigY + 15.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Tesorería & Contabilidad • JBM Cítricos S.A. de C.V.', margin + (sigW / 2), sigY + 18.5, { align: 'center' });
+
+  // Producer signature
+  const sig2X = margin + sigW + 8;
+  doc.line(sig2X + 10, sigY + 12, sig2X + sigW - 10, sigY + 12);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(15, 23, 42);
+  doc.text(producer.name, sig2X + (sigW / 2), sigY + 15.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Firma y Conformidad de Saldo del Productor', sig2X + (sigW / 2), sigY + 18.5, { align: 'center' });
+
+  // Footer Line
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
+  doc.setTextColor(148, 163, 184);
+  doc.text('ESTADO DE CUENTA OFICIAL • JBM CÍTRICOS S.A. DE C.V. • PEDERNALES, VERACRUZ • WWW.JBMCITRICOS.COM', margin, pageHeight - 4);
+  doc.text('Página 1 de 1', pageWidth - margin, pageHeight - 4, { align: 'right' });
+
+  // Save PDF
+  const filename = `Estado_Cuenta_${producer.name.replace(/\s+/g, '_')}_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+// ----------------------------------------------------------------------
+// 6. GENERATE GLOBAL FINANCIAL STATEMENT PDF (ESTADO DE CUENTA GLOBAL)
+// ----------------------------------------------------------------------
+export function generateGlobalFinancialStatementPdf(
+  settlements: Settlement[],
+  producers: Producer[],
+  batches: Batch[],
+  options?: { startDate?: string; endDate?: string }
+) {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const folioReporte = `EGF-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 900) + 100)}`;
+
+  // Totals
+  const totalSettlementsPaid = settlements.reduce((sum, s) => sum + (s.total_paid || 0), 0);
+  const totalSubtotal = settlements.reduce((sum, s) => sum + (s.subtotal || 0), 0);
+  const totalKg = settlements.reduce((sum, s) => sum + (s.total_kg || 0), 0);
+  const totalDeductions = settlements.reduce((sum, s) => sum + (s.deductions || 0), 0);
+  const totalScaleFees = settlements.reduce((sum, s) => sum + (s.scale_fees || 0), 0);
+
+  // Corporate Header
+  doc.setFillColor(6, 78, 59); // Deep Emerald
+  doc.rect(0, 0, pageWidth, 5, 'F');
+  doc.setFillColor(217, 119, 6); // Amber
+  doc.rect(0, 5, pageWidth, 1.5, 'F');
+
+  const logoX = margin;
+  const logoY = 12;
+
+  // Vector Logo
+  doc.setFillColor(180, 140, 30);
+  doc.ellipse(logoX + 8, logoY + 4, 3, 5, 'F');
+  doc.setFillColor(210, 165, 45);
+  doc.ellipse(logoX + 13, logoY + 3, 2.5, 4, 'F');
+  doc.setFillColor(11, 107, 52);
+  doc.ellipse(logoX + 10, logoY + 12, 10, 7, 'F');
+  doc.setFillColor(74, 222, 128);
+  doc.ellipse(logoX + 10, logoY + 12, 8, 5.5, 'F');
+
+  doc.setTextColor(180, 130, 20);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('JBM', logoX + 10, logoY + 22, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(6, 78, 59);
+  doc.text('JBM CÍTRICOS S.A. DE C.V.', logoX + 24, logoY + 6);
+
+  doc.setFontSize(9);
+  doc.setTextColor(180, 83, 9);
+  doc.text('EMPACADORA & EXPORTADORA DE CÍTRICOS • DIRECCIÓN DE FINANZAS Y TESORERÍA', logoX + 24, logoY + 11);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('R.F.C.: JBM980412H82 • Régimen General de Ley • Martínez de la Torre, Veracruz', logoX + 24, logoY + 16);
+  doc.text(`Periodo Contable Auditado: ${options?.startDate || '01/01/' + now.getFullYear()} al ${options?.endDate || dateStr}`, logoX + 24, logoY + 20);
+
+  // Meta Box (Right)
+  const metaBoxX = pageWidth - margin - 80;
+  const metaBoxY = 10;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(metaBoxX, metaBoxY, 80, 22, 1.5, 1.5, 'FD');
+
+  doc.setFillColor(6, 78, 59);
+  doc.roundedRect(metaBoxX + 1.5, metaBoxY + 1.5, 77, 5, 1, 1, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('ESTADO FINANCIERO GLOBAL JBM', metaBoxX + 40, metaBoxY + 5, { align: 'center' });
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text(`Folio: ${folioReporte}`, metaBoxX + 3.5, metaBoxY + 11);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Fecha Emisión: ${dateStr}`, metaBoxX + 3.5, metaBoxY + 15);
+  doc.text(`Productores Registrados: ${producers.length} cuentas`, metaBoxX + 3.5, metaBoxY + 19);
+
+  // KPI Strip
+  const kpiY = 36;
+  const kpiWidth = (pageWidth - (margin * 2) - 12) / 5;
+  const kpiHeight = 15;
+
+  const kpis = [
+    { label: 'VOLUMEN TOTAL FRUTA', value: `${totalKg.toLocaleString('es-MX')} kg`, sub: `${(totalKg / 1000).toFixed(2)} Toneladas`, color: [6, 78, 59] },
+    { label: 'VALOR BRUTO FRUTA', value: `$${totalSubtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: 'Subtotal adquirido', color: [30, 41, 59] },
+    { label: 'RETENCIÓN MANIOBRA ($0.40/kg)', value: `$${totalDeductions.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: 'Fondo de cuadrilla y tolva', color: [190, 24, 93] },
+    { label: 'CUOTAS DE BÁSCULA', value: `$${totalScaleFees.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: 'Pesaje camionero', color: [180, 83, 9] },
+    { label: 'TOTAL NETO DISPERSADO', value: `$${totalSettlementsPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, sub: `${settlements.length} liquidaciones`, color: [4, 120, 87] }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const x = margin + (idx * (kpiWidth + 3));
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(x, kpiY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
+
+    doc.setFillColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.rect(x, kpiY, kpiWidth, 1.2, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.label, x + 3, kpiY + 4.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.text(kpi.value, x + 3, kpiY + 9.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(kpi.sub, x + 3, kpiY + 13.2);
+  });
+
+  // Table of Producers Breakdown
+  const tableData = producers.map((p, idx) => {
+    const pSettlements = settlements.filter(s => s.producer_id === p.id);
+    const pKg = pSettlements.reduce((sum, s) => sum + (s.total_kg || 0), 0);
+    const pSub = pSettlements.reduce((sum, s) => sum + (s.subtotal || 0), 0);
+    const pDeds = pSettlements.reduce((sum, s) => sum + ((s.deductions || 0) + (s.scale_fees || 0)), 0);
+    const pPaid = pSettlements.reduce((sum, s) => sum + (s.total_paid || 0), 0);
+
+    return [
+      `#${p.id || idx + 1}`,
+      p.name,
+      p.rfc || 'RAMP720815KJ8',
+      p.location || p.default_orchard || 'Pedernales, Ver.',
+      `${pSettlements.length}`,
+      `${pKg.toLocaleString()} kg`,
+      `$${pSub.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `-$${pDeds.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${pPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${(p.balance || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ];
+  });
+
+  autoTable(doc, {
+    startY: kpiY + kpiHeight + 4,
+    head: [[
+      'ID',
+      'Nombre del Productor / Proveedor',
+      'RFC',
+      'Ubicación / Huerto',
+      'Cortes',
+      'Volumen Entregado',
+      'Subtotal Fruta',
+      'Deducciones',
+      'Total Liquidado',
+      'Saldo Actual'
+    ]],
+    body: tableData,
+    foot: [[
+      'TOTALES',
+      `${producers.length} Productores`,
+      '',
+      '',
+      `${settlements.length}`,
+      `${totalKg.toLocaleString()} kg`,
+      `$${totalSubtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `-$${(totalDeductions + totalScaleFees).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${totalSettlementsPaid.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${producers.reduce((s, p) => s + (p.balance || 0), 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]],
+    theme: 'grid',
+    styles: {
+      fontSize: 6.8,
+      cellPadding: 1.8,
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+      font: 'helvetica',
+      textColor: [30, 41, 59]
+    },
+    headStyles: {
+      fillColor: [6, 78, 59],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'center',
+      fontSize: 7
+    },
+    footStyles: {
+      fillColor: [241, 245, 249],
+      textColor: [15, 23, 42],
+      fontStyle: 'bold',
+      fontSize: 7.2,
+      halign: 'right'
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', halign: 'center', cellWidth: 12 },
+      1: { fontStyle: 'bold', cellWidth: 42 },
+      2: { halign: 'center', cellWidth: 24 },
+      3: { cellWidth: 32 },
+      4: { halign: 'center', cellWidth: 14 },
+      5: { fontStyle: 'bold', halign: 'right', cellWidth: 26 },
+      6: { halign: 'right', cellWidth: 26 },
+      7: { halign: 'right', textColor: [159, 18, 57], cellWidth: 24 },
+      8: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87], cellWidth: 28 },
+      9: { fontStyle: 'bold', halign: 'right', cellWidth: 24 }
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252]
+    },
+    margin: { left: margin, right: margin, bottom: 20 }
+  });
+
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text('JBM CÍTRICOS S.A. DE C.V. • BALANCE FINANCIERO Y LIQUIDACIONES DE FRUTA • WWW.JBMCITRICOS.COM', margin, pageHeight - 4);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 4, { align: 'right' });
+  }
+
+  const filename = `Estado_Financiero_Global_JBM_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+// ----------------------------------------------------------------------
+// 7. GENERATE SETTLEMENT INVOICE PDF (FACTURA DE COMPRA/LIQUIDACIÓN A PRODUCTOR)
+// ----------------------------------------------------------------------
+export function generateSettlementInvoicePdf(
+  settlement: Settlement,
+  producer?: Producer,
+  batches?: Batch[],
+  customData?: Partial<InvoiceData>
+) {
+  const dateStr = settlement.date ? settlement.date.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const prodName = producer?.name || settlement.producer_name || 'Productor Citrícola';
+  const prodRfc = producer?.rfc || 'XAXX010101000';
+  const kg = settlement.total_kg || 15000;
+  const priceKg = settlement.subtotal && settlement.total_kg ? (settlement.subtotal / settlement.total_kg) : 18.50;
+  const subtotal = settlement.subtotal || (kg * priceKg);
+  const deductions = (settlement.deductions || 0) + (settlement.scale_fees || 0);
+  const total = settlement.total_paid || (subtotal - deductions);
+
+  const invoiceData: InvoiceData = {
+    folio: customData?.folio || `FAC-${settlement.folio.replace(/[^0-9]/g, '') || '00984'}`,
+    uuid: customData?.uuid || `4C81A810-75E2-41D1-A19F-${String(settlement.id || 100).padStart(12, '0')}`,
+    date: dateStr,
+    dueDate: dateStr,
+    currency: 'MXN',
+    paymentMethod: 'PUE (Pago en una sola exhibición)',
+    paymentForm: settlement.payment_method === 'Efectivo' 
+      ? '01 - Efectivo' 
+      : (settlement.payment_method === 'Cheque' ? '02 - Cheque nominativo' : '03 - Transferencia electrónica de fondos'),
+    cfdiUse: 'G01 - Adquisición de mercancías',
+    customer: {
+      name: prodName,
+      rfc: prodRfc,
+      taxRegime: '621 - Incorporación Fiscal / 601 General',
+      address: producer?.location || 'Martínez de la Torre, Veracruz, C.P. 93600',
+      email: producer?.email || 'contacto@jbmcitricos.com',
+      phone: producer?.phone || '+52 232 324 8890'
+    },
+    items: [
+      {
+        satCode: '50101518',
+        description: 'Limón Persa Fresco (Citrus latifolia) - Recepción de Cítricos en Tolva',
+        quantity: kg,
+        unit: 'KGM - Kilogramo',
+        unitPrice: priceKg,
+        discount: 0,
+        taxRate: 0, // 0% Tasa Agrícola
+        amount: subtotal
+      },
+      ...(deductions > 0 ? [
+        {
+          satCode: '78101800',
+          description: 'Descuento / Retención por Servicios de Maniobra, Tolva y Pesaje en Báscula Camionera',
+          quantity: 1,
+          unit: 'E48 - Unidad de servicio',
+          unitPrice: -deductions,
+          discount: 0,
+          taxRate: 0,
+          amount: -deductions
+        }
+      ] : [])
+    ],
+    subtotal: subtotal,
+    discountTotal: deductions > 0 ? deductions : 0,
+    taxTotal: 0,
+    retentionTotal: deductions,
+    total: total,
+    totalInWords: numberToSpanishCurrency(total, 'MXN'),
+    notes: `Liquidación respaldada por Folio ${settlement.folio}. Recepción y pesaje certificado en báscula de 80 Toneladas. Certificación SENASICA MEX-VER-CIT-2024.`,
+    ...customData
+  };
+
+  generateInvoicePdf(invoiceData);
+}
+
+// ----------------------------------------------------------------------
+// 8. GENERATE SALES REPORT PDF (REPORTE EJECUTIVO DE VENTAS Y FACTURACIÓN)
+// ----------------------------------------------------------------------
+export function generateSalesReportPdf(report: SalesReportData) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'letter'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const dateStr = report.generatedDate || new Date().toISOString().slice(0, 10);
+  const folioStr = `REP-VTA-${dateStr.replace(/-/g, '')}`;
+
+  // Official JBM Corporate Header
+  drawCorporateHeader(
+    doc,
+    'REPORTE EJECUTIVO DE VENTAS',
+    folioStr,
+    dateStr,
+    pageWidth,
+    margin
+  );
+
+  let currentY = 32;
+
+  // Filter and Period Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 12, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(6, 78, 59); // Emerald 900
+  doc.text('PERÍODO ANALIZADO:', margin + 3.5, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.periodLabel || `${report.startDate} al ${report.endDate}`, margin + 36, currentY + 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('GENERADO POR:', margin + 110, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.generatedBy || 'Departamento de Finanzas & Ventas JBM', margin + 134, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Reporte consolidado de operaciones comerciales, ventas en mostrador, mayoristas y distribución nacional de cítricos.', margin + 3.5, currentY + 9.5);
+
+  currentY += 16;
+
+  // Executive KPI summary cards (4 Columns)
+  const kpiWidth = (pageWidth - (margin * 2) - 9) / 4;
+  const kpiHeight = 16;
+
+  const kpis = [
+    {
+      title: 'FACTURACIÓN TOTAL',
+      value: `$${(report.summary.totalRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `${(report.summary.totalTransactions || 0)} notas emitidas`,
+      bg: [236, 253, 245], // emerald-50
+      border: [16, 185, 129], // emerald-500
+      valColor: [4, 120, 87]
+    },
+    {
+      title: 'VOLUMEN VENDIDO (KG)',
+      value: `${(report.summary.totalKg || 0).toLocaleString('es-MX')} kg`,
+      subtitle: `${((report.summary.totalKg || 0) / 1000).toFixed(2)} Toneladas`,
+      bg: [239, 246, 255], // blue-50
+      border: [59, 130, 246], // blue-500
+      valColor: [29, 78, 216]
+    },
+    {
+      title: 'TOTAL CAJAS DESPACHADAS',
+      value: `${(report.summary.totalBoxes || 0).toLocaleString('es-MX')} cjs`,
+      subtitle: 'Exportación y Nacional',
+      bg: [254, 243, 199], // amber-50
+      border: [245, 158, 11], // amber-500
+      valColor: [180, 83, 9]
+    },
+    {
+      title: 'TICKET PROMEDIO',
+      value: `$${(report.summary.avgTicket || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `Desc: $${(report.summary.totalDiscounts || 0).toLocaleString('es-MX')}`,
+      bg: [245, 243, 255], // purple-50
+      border: [139, 92, 246], // purple-500
+      valColor: [109, 40, 217]
+    }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = margin + (idx * (kpiWidth + 3));
+    doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
+    doc.setDrawColor(kpi.border[0], kpi.border[1], kpi.border[2]);
+    doc.roundedRect(kX, currentY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(kpi.title, kX + 2.5, currentY + 4.2);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(kpi.valColor[0], kpi.valColor[1], kpi.valColor[2]);
+    doc.text(kpi.value, kX + 2.5, currentY + 9.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.subtitle, kX + 2.5, currentY + 13.5);
+  });
+
+  currentY += kpiHeight + 5;
+
+  // Section 1: Desglose por Forma de Pago & Canales
+  if (report.paymentMethods && report.paymentMethods.length > 0) {
+    const pmTableData = report.paymentMethods.map(pm => [
+      pm.method,
+      `${pm.count} transacciones`,
+      `${pm.percentage.toFixed(1)}%`,
+      `$${pm.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [[
+        'Método / Canal de Cobro',
+        'Operaciones',
+        'Participación (%)',
+        'Monto Total Cobrado'
+      ]],
+      body: pmTableData,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.8,
+        cellPadding: 1.5,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [6, 78, 59], // Emerald 900
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 55 },
+        1: { halign: 'center', cellWidth: 35 },
+        2: { halign: 'center', cellWidth: 35 },
+        3: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87] }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Section 2: Resumen de Ventas Diarias / Calendario
+  if (report.dailySales && report.dailySales.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('DESGLOSE DIARIO DE VENTAS Y VOLUMEN', margin, currentY + 3.5);
+
+    const dailyRows = report.dailySales.map(d => [
+      d.date,
+      d.label || d.date,
+      d.dayOfWeek || '',
+      `${(d.totalKg || 0).toLocaleString()} kg`,
+      `${(d.totalBoxes || 0).toLocaleString()} cjs`,
+      `${d.transactionsCount || 0}`,
+      `$${(d.avgTicket || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${(d.totalAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    const totalKgSum = report.dailySales.reduce((acc, d) => acc + (d.totalKg || 0), 0);
+    const totalBoxesSum = report.dailySales.reduce((acc, d) => acc + (d.totalBoxes || 0), 0);
+    const totalTransSum = report.dailySales.reduce((acc, d) => acc + (d.transactionsCount || 0), 0);
+    const totalAmountSum = report.dailySales.reduce((acc, d) => acc + (d.totalAmount || 0), 0);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Fecha',
+        'Etiqueta',
+        'Día',
+        'Kilos (Kg)',
+        'Cajas',
+        'Tickets',
+        'Ticket Prom.',
+        'Total Ingreso'
+      ]],
+      body: dailyRows,
+      foot: [[
+        'TOTALES',
+        `${report.dailySales.length} días`,
+        '',
+        `${totalKgSum.toLocaleString()} kg`,
+        `${totalBoxesSum.toLocaleString()} cjs`,
+        `${totalTransSum}`,
+        `$${(totalAmountSum / (totalTransSum || 1)).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+        `$${totalAmountSum.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+      ]],
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [30, 41, 59], // Slate 800
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      footStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 7,
+        halign: 'right'
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 24 },
+        1: { cellWidth: 22 },
+        2: { halign: 'center', cellWidth: 16 },
+        3: { halign: 'right', cellWidth: 24 },
+        4: { halign: 'right', cellWidth: 20 },
+        5: { halign: 'center', cellWidth: 18 },
+        6: { halign: 'right', cellWidth: 28 },
+        7: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87], cellWidth: 32 }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Section 3: Top Productos / Presentaciones Más Vendidas
+  if (report.topProducts && report.topProducts.length > 0) {
+    // Check if we need a new page
+    if (currentY > pageHeight - 50) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('PRESENTACIONES Y PRODUCTOS CON MAYOR DEMANDA', margin, currentY + 3.5);
+
+    const prodRows = report.topProducts.map(p => [
+      p.name,
+      p.calibre || '-',
+      p.itemType === 'caja' ? 'Caja Empacada' : 'Granel / Kilo',
+      p.boxesSold > 0 ? `${p.boxesSold.toLocaleString()} cjs` : '-',
+      `${(p.kgSold || 0).toLocaleString()} kg`,
+      `${(p.volumePercent || p.share || 0).toFixed(1)}%`,
+      `$${(p.revenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Descripción del Producto / Presentación',
+        'Calibre',
+        'Tipo',
+        'Cajas',
+        'Kilos Totales',
+        'Participación',
+        'Ingresos Generados'
+      ]],
+      body: prodRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [180, 83, 9], // Amber 700
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 56 },
+        1: { halign: 'center', cellWidth: 18 },
+        2: { cellWidth: 24 },
+        3: { halign: 'right', cellWidth: 20 },
+        4: { halign: 'right', cellWidth: 24 },
+        5: { halign: 'center', cellWidth: 20 },
+        6: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87] }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Section 4: Individual Sales Log (if provided and small)
+  if (report.salesList && report.salesList.length > 0) {
+    if (currentY > pageHeight - 55) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('ÚLTIMAS NOTAS DE VENTA EMITIDAS', margin, currentY + 3.5);
+
+    const saleRows = report.salesList.slice(0, 15).map(s => [
+      s.folio,
+      (s.date || '').slice(0, 16).replace('T', ' '),
+      s.customer_name || 'Venta Mostrador',
+      s.payment_method || 'Efectivo',
+      s.status === 'cancelada' ? 'CANCELADA' : 'COMPLETADA',
+      `$${(s.discount_amount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      `$${(s.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Folio Nota',
+        'Fecha / Hora',
+        'Cliente / Destino',
+        'Método Pago',
+        'Estado',
+        'Descuento',
+        'Importe Total'
+      ]],
+      body: saleRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.2,
+        cellPadding: 1.3,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [6, 78, 59],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.5
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 26 },
+        1: { cellWidth: 32 },
+        2: { cellWidth: 42 },
+        3: { cellWidth: 24 },
+        4: { halign: 'center', cellWidth: 22 },
+        5: { halign: 'right', cellWidth: 20 },
+        6: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87] }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Legal & Authorization Signature Block
+  if (currentY > pageHeight - 35) {
+    doc.addPage();
+    currentY = 20;
+  }
+
+  const sigWidth = 55;
+  const sigY = pageHeight - 25;
+
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin + 15, sigY, margin + 15 + sigWidth, sigY);
+  doc.line(pageWidth - margin - 15 - sigWidth, sigY, pageWidth - margin - 15, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('C.P. GERENCIA COMERCIAL', margin + 15 + (sigWidth / 2), sigY + 3.5, { align: 'center' });
+  doc.text('DIRECCIÓN GENERAL / FINANZAS', pageWidth - margin - 15 - (sigWidth / 2), sigY + 3.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Emisión y validación de ventas', margin + 15 + (sigWidth / 2), sigY + 6.5, { align: 'center' });
+  doc.text('JBM Cítricos S.A. de C.V.', pageWidth - margin - 15 - (sigWidth / 2), sigY + 6.5, { align: 'center' });
+
+  // Page Footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('JBM CÍTRICOS S.A. DE C.V. • REPORTE OFICIAL DE VENTAS Y FACTURACIÓN • WWW.JBMCITRICOS.COM', margin, pageHeight - 3.8);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 3.8, { align: 'right' });
+  }
+
+  const filename = `Reporte_Ventas_JBM_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+// ----------------------------------------------------------------------
+// 9. GENERATE MONTHLY BALANCE PDF (BALANCE GENERAL Y ESTADO DE RESULTADOS)
+// ----------------------------------------------------------------------
+export function generateMonthlyBalancePdf(balance: MonthlyBalanceData) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'letter'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const dateStr = balance.generatedDate || new Date().toISOString().slice(0, 10);
+  const folioStr = balance.folio || `BAL-MEN-${balance.year}-${String(balance.monthName).toUpperCase()}`;
+
+  // Official Corporate Header
+  drawCorporateHeader(
+    doc,
+    'ESTADO DE RESULTADOS Y BALANCE',
+    folioStr,
+    dateStr,
+    pageWidth,
+    margin
+  );
+
+  let currentY = 32;
+
+  // Period Banner Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 12, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(6, 78, 59); // Emerald 900
+  doc.text('EJERCICIO CONTABLE:', margin + 3.5, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(30, 41, 59);
+  doc.text(balance.periodLabel || `${balance.monthName} ${balance.year}`, margin + 38, currentY + 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('EMISIÓN:', margin + 110, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+  doc.text(`${dateStr} • Auditoría Interna JBM`, margin + 125, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Conciliación integral de ventas comerciales, liquidación de fruta a productores, cobro de báscula y gastos operativos.', margin + 3.5, currentY + 9.5);
+
+  currentY += 16;
+
+  // Top Financial Executive KPIs (5 Cards)
+  const kpiCount = 5;
+  const kpiWidth = (pageWidth - (margin * 2) - ((kpiCount - 1) * 2.5)) / kpiCount;
+  const kpiHeight = 16;
+
+  const kpis = [
+    {
+      title: 'INGRESOS TOTALES',
+      value: `$${(balance.totalIncome || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: 'Ventas + Báscula',
+      bg: [236, 253, 245],
+      border: [16, 185, 129],
+      valColor: [4, 120, 87]
+    },
+    {
+      title: 'COSTO MATERIA PRIMA',
+      value: `$${(balance.fruitAcquisitionCost || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `${(balance.totalFruitKgPurchased || 0).toLocaleString()} kg recibidos`,
+      bg: [254, 242, 242],
+      border: [239, 68, 68],
+      valColor: [185, 28, 28]
+    },
+    {
+      title: 'UTILIDAD BRUTA',
+      value: `$${(balance.totalGrossProfit || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `Margen: ${(balance.grossMarginPercent || 0).toFixed(1)}%`,
+      bg: [239, 246, 255],
+      border: [59, 130, 246],
+      valColor: [29, 78, 216]
+    },
+    {
+      title: 'GASTOS OPERATIVOS',
+      value: `$${(balance.totalOperatingExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: 'Maniobra + Fletes + Insumos',
+      bg: [254, 243, 199],
+      border: [245, 158, 11],
+      valColor: [180, 83, 9]
+    },
+    {
+      title: 'UTILIDAD NETA',
+      value: `$${(balance.netOperatingIncome || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `Margen Neto: ${(balance.netMarginPercent || 0).toFixed(1)}%`,
+      bg: [245, 243, 255],
+      border: [139, 92, 246],
+      valColor: [109, 40, 217]
+    }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = margin + (idx * (kpiWidth + 2.5));
+    doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
+    doc.setDrawColor(kpi.border[0], kpi.border[1], kpi.border[2]);
+    doc.roundedRect(kX, currentY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(kpi.title, kX + 2, currentY + 4.2);
+
+    doc.setFontSize(7.8);
+    doc.setTextColor(kpi.valColor[0], kpi.valColor[1], kpi.valColor[2]);
+    doc.text(kpi.value, kX + 2, currentY + 9.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.subtitle, kX + 2, currentY + 13.5);
+  });
+
+  currentY += kpiHeight + 5;
+
+  // Table 1: Estado de Resultados Integral (P&L Condensado)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(6, 78, 59);
+  doc.text('ESTADO DE RESULTADOS INTEGRAL (P&L CONDENSADO)', margin, currentY + 3.5);
+
+  const pnlRows = [
+    ['(+) Ventas de Fruta y Distribución (Mostrador, CEDA, Exportación)', `$${(balance.citrusSalesRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, '100.0%'],
+    ['(+) Cobro de Servicios de Báscula y Pesaje a Terceros', `$${(balance.scaleServicesRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `${((balance.scaleServicesRevenue / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(+) Subproductos / Mermas y Fruta de Proceso Molino', `$${(balance.subproductsRevenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `${((balance.subproductsRevenue / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(=) TOTAL INGRESOS OPERACIONALES BRUTOS', `$${(balance.totalIncome || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, '100.0%'],
+    ['(-) Costo de Adquisición de Fruta (Liquidaciones a Productores)', `-$${(balance.fruitAcquisitionCost || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.fruitAcquisitionCost || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(=) UTILIDAD BRUTA OPERATIVA', `$${(balance.totalGrossProfit || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `${(balance.grossMarginPercent || 0).toFixed(1)}%`],
+    ['(-) Gastos de Maniobra de Descarga y Tolva ($0.40/kg)', `-$${(balance.maneuverAndTolvaExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.maneuverAndTolvaExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(-) Combustible, Fletes y Transporte Local', `-$${(balance.localAndFreightExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.localAndFreightExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(-) Insumos de Empaque (Cajas, Cintas, Tarimas HT, Esquineros)', `-$${(balance.suppliesAndPackagingExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.suppliesAndPackagingExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(-) Mantenimiento, Energía Cámaras Frías y Servicios', `-$${(balance.maintenanceAndUtilitiesExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.maintenanceAndUtilitiesExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(-) Nómina Operativa y Alimentos de Turno', `-$${(balance.payrollAndStaffExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.payrollAndStaffExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(-) Otros Gastos Menores de Operación', `-$${(balance.otherExpenses || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `-${(((balance.otherExpenses || 0) / (balance.totalIncome || 1)) * 100).toFixed(1)}%`],
+    ['(=) UTILIDAD NETA DEL PERÍODO (EBITDA ESTIMADO)', `$${(balance.netOperatingIncome || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, `${(balance.netMarginPercent || 0).toFixed(1)}%`]
+  ];
+
+  autoTable(doc, {
+    startY: currentY + 5,
+    head: [[
+      'Rubro / Concepto Contable',
+      'Monto en Pesos (MXN)',
+      '% s/ Ingresos'
+    ]],
+    body: pnlRows,
+    theme: 'grid',
+    styles: {
+      fontSize: 6.5,
+      cellPadding: 1.4,
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+      font: 'helvetica',
+      textColor: [30, 41, 59]
+    },
+    headStyles: {
+      fillColor: [6, 78, 59], // Emerald 900
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 6.8
+    },
+    columnStyles: {
+      0: { cellWidth: 120 },
+      1: { halign: 'right', cellWidth: 42, fontStyle: 'bold' },
+      2: { halign: 'center', cellWidth: 26 }
+    },
+    didParseCell: (data) => {
+      // Highlight total and subtotal rows
+      const rowText = String(data.row.raw?.[0] || '');
+      if (rowText.startsWith('(=)')) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [241, 245, 249];
+        if (rowText.includes('UTILIDAD NETA')) {
+          data.cell.styles.textColor = [4, 120, 87];
+          data.cell.styles.fillColor = [236, 253, 245];
+        }
+      }
+    },
+    margin: { left: margin, right: margin }
+  });
+
+  currentY = (doc as any).lastAutoTable.finalY + 5;
+
+  // Table 2: Conciliación de Cuentas de Balance (Working Capital)
+  if (currentY > pageHeight - 60) {
+    doc.addPage();
+    currentY = 15;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(6, 78, 59);
+  doc.text('CONCILIACIÓN DE ACTIVOS, INVENTARIOS Y PASIVOS CON PRODUCTORES', margin, currentY + 3.5);
+
+  const balanceSheetRows = [
+    ['Efectivo en Caja y Bancos (Disponibilidad Operativa)', `$${(balance.cashInHandAndBank || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, 'Activo Circulante Disponible'],
+    ['Valoración de Inventario en Cámara Fría y Bodega CDMX', `$${(balance.inventoryValuation || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, 'Existencias de Fruta Valuada a Costo Base'],
+    ['Saldo Pendiente de Liquidación a Productores (Cuentas por Pagar)', `$${(balance.producersPayablesBalance || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, 'Pasivo Corto Plazo con Productores'],
+    ['Número de Lotes / Boletas Procesadas en el Mes', `${balance.batchesCount || 0} boletas`, 'Entregas en Báscula Pedernales'],
+    ['Productores Activos con Entregas de Fruta', `${balance.producersCount || 0} productores`, 'Padrón de Productores Citrícolas']
+  ];
+
+  autoTable(doc, {
+    startY: currentY + 5,
+    head: [[
+      'Cuenta de Balance / Indicador Operativo',
+      'Saldo al Cierre (MXN)',
+      'Detalle y Clasificación'
+    ]],
+    body: balanceSheetRows,
+    theme: 'grid',
+    styles: {
+      fontSize: 6.5,
+      cellPadding: 1.4,
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+      font: 'helvetica',
+      textColor: [30, 41, 59]
+    },
+    headStyles: {
+      fillColor: [30, 41, 59], // Slate 800
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 6.8
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 90 },
+      1: { halign: 'right', cellWidth: 42, fontStyle: 'bold', textColor: [4, 120, 87] },
+      2: { cellWidth: 56, textColor: [100, 116, 139] }
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252]
+    },
+    margin: { left: margin, right: margin }
+  });
+
+  currentY = (doc as any).lastAutoTable.finalY + 8;
+
+  // Signatures and Auditor seal
+  if (currentY > pageHeight - 35) {
+    doc.addPage();
+    currentY = 20;
+  }
+
+  const sigWidth = 55;
+  const sigY = pageHeight - 25;
+
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin + 15, sigY, margin + 15 + sigWidth, sigY);
+  doc.line(pageWidth - margin - 15 - sigWidth, sigY, pageWidth - margin - 15, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('C.P. AUDITORÍA CONTABLE', margin + 15 + (sigWidth / 2), sigY + 3.5, { align: 'center' });
+  doc.text('DIRECCIÓN GENERAL / FINANZAS', pageWidth - margin - 15 - (sigWidth / 2), sigY + 3.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Revisión y conciliación fiscal', margin + 15 + (sigWidth / 2), sigY + 6.5, { align: 'center' });
+  doc.text('JBM Cítricos S.A. de C.V.', pageWidth - margin - 15 - (sigWidth / 2), sigY + 6.5, { align: 'center' });
+
+  // Page Footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('JBM CÍTRICOS S.A. DE C.V. • ESTADO DE RESULTADOS Y BALANCE GENERAL • WWW.JBMCITRICOS.COM', margin, pageHeight - 3.8);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 3.8, { align: 'right' });
+  }
+
+  const filename = `Balance_Mensual_JBM_${dateStr}.pdf`;
+  doc.save(filename);
+}
+

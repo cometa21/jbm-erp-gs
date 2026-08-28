@@ -3,7 +3,7 @@ import { POSInventoryItem, POSUserRole } from '../../types';
 import { 
   Package, Scissors, Edit3, Search, RefreshCw, AlertTriangle, 
   CheckCircle2, ArrowRight, DollarSign, Lock, Sparkles, Scale,
-  Layers, Check
+  Layers, Check, Barcode
 } from 'lucide-react';
 
 interface POSTabInventarioProps {
@@ -52,10 +52,13 @@ export const POSTabInventario: React.FC<POSTabInventarioProps> = ({ currentRole 
   const calibresList = Array.from(new Set(inventory.map(i => i.calibre))).filter(Boolean);
 
   const filteredItems = inventory.filter(item => {
+    const searchLower = searchTerm.toLowerCase();
     const matchesCalibre = selectedCalibre === 'all' || item.calibre === selectedCalibre;
-    const matchesSearch = item.presentation_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.lot_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.calibre.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = item.presentation_name.toLowerCase().includes(searchLower) ||
+                          item.lot_code.toLowerCase().includes(searchLower) ||
+                          item.calibre.toLowerCase().includes(searchLower) ||
+                          (item.barcode && item.barcode.toLowerCase().includes(searchLower)) ||
+                          (item.sku && item.sku.toLowerCase().includes(searchLower));
     return matchesCalibre && matchesSearch;
   });
 
@@ -269,13 +272,21 @@ export const POSTabInventario: React.FC<POSTabInventarioProps> = ({ currentRole 
                     </td>
 
                     <td className="px-4 py-4">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          isBox ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                        }`}>
-                          {isBox ? 'Caja' : 'Granel'}
-                        </span>
-                        <span className="font-mono text-slate-500 text-[11px]">{item.lot_code}</span>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            isBox ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {isBox ? 'Caja' : 'Granel'}
+                          </span>
+                          <span className="font-mono text-slate-500 text-[11px]">{item.lot_code}</span>
+                        </div>
+                        {item.barcode && (
+                          <div className="flex items-center gap-1 text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 w-fit">
+                            <Barcode className="w-3 h-3 text-slate-400" />
+                            <span>{item.barcode}</span>
+                          </div>
+                        )}
                       </div>
                     </td>
 

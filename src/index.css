@@ -13,7 +13,249 @@
 @layer base {
   body {
     @apply font-sans bg-slate-50 text-slate-900;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
+}
+
+/* ========================================================================= */
+/* HIGH-CONTRAST DARK & NIGHT-PLANT SHIFT THEME FOR PACKING PLANT TERMINALS  */
+/* ========================================================================= */
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background-color: #0b0f19 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Background Gradients & Grids in Dark Mode */
+.dark .bg-grid {
+  background-image: radial-gradient(circle at 1px 1px, #1e293b 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Surface and Card Overrides for Dark Mode */
+.dark .bg-white {
+  background-color: #131b2e !important;
+  color: #f8fafc;
+}
+
+.dark .bg-slate-50 {
+  background-color: #0d1424 !important;
+}
+
+.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-slate-200 {
+  background-color: #334155 !important;
+}
+
+.dark .bg-white\/95 {
+  background-color: rgba(19, 27, 46, 0.95) !important;
+}
+
+.dark .bg-white\/90 {
+  background-color: rgba(19, 27, 46, 0.9) !important;
+}
+
+.dark .bg-white\/80 {
+  background-color: rgba(19, 27, 46, 0.8) !important;
+}
+
+/* High Contrast Text Adjustments */
+.dark .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+.dark .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Borders in Dark Mode */
+.dark .border-slate-100 {
+  border-color: #1e293b !important;
+}
+
+.dark .border-slate-200 {
+  border-color: #243044 !important;
+}
+
+.dark .border-slate-200\/90 {
+  border-color: #243044 !important;
+}
+
+.dark .border-slate-200\/80 {
+  border-color: #243044 !important;
+}
+
+.dark .border-slate-300 {
+  border-color: #334155 !important;
+}
+
+.dark .divide-slate-100 > * + * {
+  border-color: #1e293b !important;
+}
+
+.dark .divide-slate-200 > * + * {
+  border-color: #243044 !important;
+}
+
+/* Inputs, Selects, and Textareas in Dark Mode */
+.dark input[type="text"],
+.dark input[type="number"],
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input[type="search"],
+.dark input[type="password"],
+.dark select,
+.dark textarea {
+  background-color: #0d1424 !important;
+  color: #f8fafc !important;
+  border-color: #2b3952 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #10b981 !important;
+  background-color: #111a2e !important;
+}
+
+/* Tables in Dark Mode */
+.dark thead {
+  background-color: #162035 !important;
+}
+
+.dark tbody tr:hover {
+  background-color: #19243b !important;
+}
+
+/* Hover States on Elements */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #172136 !important;
+}
+
+.dark .hover\:bg-slate-100:hover {
+  background-color: #1e293b !important;
+}
+
+.dark .hover\:bg-white:hover {
+  background-color: #172136 !important;
+}
+
+/* Modals & Backdrop in Dark Mode */
+.dark .bg-slate-900\/75,
+.dark .bg-slate-900\/60,
+.dark .bg-black\/50 {
+  background-color: rgba(3, 7, 18, 0.85) !important;
+}
+
+/* NIGHT-PLANT SHIFT MODE (Ultra High Contrast, Anti-Glare for Low-Light Packing Plant) */
+.night-plant body {
+  background-color: #050811 !important;
+  color: #ffffff !important;
+}
+
+.night-plant .bg-white {
+  background-color: #0d1527 !important;
+  border-color: #26354f !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+}
+
+.night-plant .bg-slate-50 {
+  background-color: #080e1b !important;
+  border-color: #1f2b40 !important;
+}
+
+.night-plant .bg-slate-100 {
+  background-color: #141f35 !important;
+}
+
+.night-plant input,
+.night-plant select,
+.night-plant textarea {
+  background-color: #080e1b !important;
+  color: #ffffff !important;
+  border-color: #3b4c6b !important;
+}
+
+.night-plant .text-slate-900 {
+  color: #ffffff !important;
+  font-weight: 700;
+}
+
+.night-plant .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+.night-plant .text-slate-700 {
+  color: #f1f5f9 !important;
+}
+
+.night-plant .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.night-plant .text-slate-500 {
+  color: #a5b4fc !important;
+}
+
+/* Protect print preview from dark mode styling when printing or viewing document */
+.printable-document,
+.printable-document * {
+  color-scheme: light !important;
+}
+.printable-document .bg-white {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+.printable-document .text-slate-900 {
+  color: #0f172a !important;
+}
+.printable-document .text-slate-800 {
+  color: #1e293b !important;
+}
+.printable-document .text-slate-700 {
+  color: #334155 !important;
+}
+.printable-document .text-slate-600 {
+  color: #475569 !important;
+}
+.printable-document .text-slate-500 {
+  color: #64748b !important;
+}
+.printable-document .bg-slate-50 {
+  background-color: #f8fafc !important;
+}
+.printable-document .bg-slate-100 {
+  background-color: #f1f5f9 !important;
+}
+.printable-document .border-slate-200 {
+  border-color: #e2e8f0 !important;
 }
 
 /* Custom scrollbar */
@@ -35,12 +277,21 @@
 }
 
 /* Print Styling for Thermal Receipts and Documents */
+.thermal-receipt {
+  font-family: 'JetBrains Mono', 'Courier New', Courier, Monaco, monospace;
+  letter-spacing: -0.01em;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 @media print {
   body {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Hide navigation, sidebars, buttons and modals backgrounds when printing */
@@ -66,7 +317,9 @@
     width: 80mm !important;
     max-width: 80mm !important;
     margin: 0 auto !important;
-    padding: 2mm 3mm !important;
+    padding: 1.5mm 2.5mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
   }
 
   .printable-document {
