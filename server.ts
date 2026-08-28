@@ -952,6 +952,244 @@ async function startServer() {
     }
   });
 
+  // Consolidated Recent Operations Feed (Weight Entries, Stock Movements, POS Transactions)
+  app.get("/api/operations/recent", (req, res) => {
+    try {
+      const category = String(req.query.category || 'all').toLowerCase(); // 'all', 'weight', 'stock', 'pos'
+      const search = String(req.query.search || '').toLowerCase().trim();
+      const limit = Math.min(parseInt(String(req.query.limit || '40'), 10), 100);
+
+      // 1. Fetch Weight Entries (Batches)
+      const batches = db.prepare(`
+        SELECT 
+          b.id,
+          b.folio,
+          b.scale_ticket_folio,
+          b.producer_id,
+          COALESCE(p.name, 'Productor Independiente') as producer_name,
+          b.variety,
+          b.weight_gross,
+          b.weight_tare,
+          b.weight_net,
+          b.price_per_kg,
+          b.scale_fee,
+          b.extra_charge_total,
+          b.total,
+          b.vehicle_plates,
+          b.driver_name,
+          b.orchard,
+          b.operator,
+          b.date,
+          b.status
+        FROM batches b
+        LEFT JOIN producers p ON b.producer_id = p.id
+        ORDER BY b.id DESC
+        LIMIT 40
+      `).all() as any[];
+
+      // 2. Fetch Stock Movements (Inventory Logs)
+      const inventoryLogs = db.prepare(`
+        SELECT 
+          l.id,
+          l.item_id,
+          l.item_name,
+          l.type,
+          l.qty,
+          l.prev_qty,
+          l.new_qty,
+          l.reason,
+          l.user,
+          l.date
+        FROM inventory_logs l
+        ORDER BY l.id DESC
+        LIMIT 40
+      `).all() as any[];
+
+      // 3. Fetch POS Transactions (Sales)
+      const sales = db.prepare(`
+        SELECT 
+          s.id,
+          s.folio,
+          COALESCE(s.customer_name, 'Venta Mostrador') as customer_name,
+          s.items_count,
+          s.subtotal,
+          s.tax,
+          s.total,
+          s.payment_method,
+          s.date
+        FROM sales s
+        ORDER BY s.id DESC
+        LIMIT 40
+      `).all() as any[];
+
+      // Normalize into unified OperationFeedItem objects
+      const normalizedOperations: any[] = [];
+
+      // Add Weight Entries
+      if (category === 'all' || category === 'weight' || category === 'pesajes') {
+        batches.forEach(b => {
+          normalizedOperations.push({
+            id: `weight-${b.id}`,
+            entityId: b.id,
+            type: 'weight_entry',
+            categoryLabel: 'Báscula Camionera',
+            folio: b.folio || `BOL-${String(b.id).padStart(5, '0')}`,
+            ticketFolio: b.scale_ticket_folio || `TCK-${String(b.id).padStart(4, '0')}`,
+            title: `Pesaje de ${b.variety || 'Limón Mexicano'}`,
+            subtitle: `Productor: ${b.producer_name} • Huerto: ${b.orchard || 'Apatzingán'}`,
+            timestamp: b.date || new Date().toISOString(),
+            date: b.date,
+            badge: {
+              label: b.status === 'liquidado' ? 'Liquidado' : 'Recibido en Patio',
+              variant: b.status === 'liquidado' ? 'emerald' : 'blue'
+            },
+            metrics: {
+              primaryValue: `${(b.weight_net || 0).toLocaleString('es-MX')} kg`,
+              primaryLabel: 'Peso Neto Fruta',
+              secondaryValue: `$${(b.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+              secondaryLabel: 'Liquidación Total'
+            },
+            details: {
+              grossWeight: b.weight_gross,
+              tareWeight: b.weight_tare,
+              netWeight: b.weight_net,
+              pricePerKg: b.price_per_kg,
+              scaleFee: b.scale_fee,
+              producer: b.producer_name,
+              driver: b.driver_name || 'Transportista Asignado',
+              plates: b.vehicle_plates || 'Michoacán',
+              operator: b.operator || 'Carlos Barragán',
+              variety: b.variety || 'Limón Mexicano Calidad Exportación'
+            }
+          });
+        });
+      }
+
+      // Add Stock Movements
+      if (category === 'all' || category === 'stock' || category === 'inventario') {
+        inventoryLogs.forEach(log => {
+          const isPositive = log.type?.toLowerCase().includes('entrada') || (log.new_qty > log.prev_qty);
+          normalizedOperations.push({
+            id: `stock-${log.id}`,
+            entityId: log.id,
+            type: 'stock_movement',
+            categoryLabel: 'Movimiento de Almacén',
+            folio: `MOV-${String(log.id).padStart(4, '0')}`,
+            ticketFolio: null,
+            title: `${log.type || 'Movimiento'}: ${log.item_name}`,
+            subtitle: `Motivo: ${log.reason || 'Actualización de existencias'}`,
+            timestamp: log.date || new Date().toISOString(),
+            date: log.date,
+            badge: {
+              label: log.type || 'Ajuste',
+              variant: isPositive ? 'emerald' : 'amber'
+            },
+            metrics: {
+              primaryValue: `${isPositive ? '+' : '-'}${Math.abs(log.qty || 0).toLocaleString()} pzas`,
+              primaryLabel: 'Volumen Movido',
+              secondaryValue: `Stock: ${(log.new_qty || 0).toLocaleString()}`,
+              secondaryLabel: 'Existencia Final'
+            },
+            details: {
+              itemName: log.item_name,
+              movementType: log.type,
+              qty: log.qty,
+              prevQty: log.prev_qty,
+              newQty: log.new_qty,
+              reason: log.reason,
+              operator: log.user || 'Almacén Central',
+              delta: isPositive ? `+${log.qty}` : `-${log.qty}`
+            }
+          });
+        });
+      }
+
+      // Add POS Transactions
+      if (category === 'all' || category === 'pos' || category === 'ventas') {
+        sales.forEach(s => {
+          normalizedOperations.push({
+            id: `pos-${s.id}`,
+            entityId: s.id,
+            type: 'pos_transaction',
+            categoryLabel: 'Punto de Venta (POS)',
+            folio: s.folio || `VEN-${String(s.id).padStart(5, '0')}`,
+            ticketFolio: null,
+            title: `Venta Comercial #${s.id}`,
+            subtitle: `Cliente: ${s.customer_name} • Pago: ${s.payment_method || 'Efectivo'}`,
+            timestamp: s.date || new Date().toISOString(),
+            date: s.date,
+            badge: {
+              label: s.payment_method || 'Efectivo',
+              variant: 'purple'
+            },
+            metrics: {
+              primaryValue: `$${(s.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+              primaryLabel: 'Total Pagado',
+              secondaryValue: `${s.items_count || 1} producto(s)`,
+              secondaryLabel: 'Artículos / Cajas'
+            },
+            details: {
+              customer: s.customer_name,
+              itemsCount: s.items_count,
+              subtotal: s.subtotal,
+              tax: s.tax,
+              total: s.total,
+              paymentMethod: s.payment_method,
+              operator: 'Caja POS 1'
+            }
+          });
+        });
+      }
+
+      // Sort combined array by timestamp/date descending
+      normalizedOperations.sort((a, b) => {
+        const timeA = new Date(a.timestamp).getTime() || 0;
+        const timeB = new Date(b.timestamp).getTime() || 0;
+        return timeB - timeA;
+      });
+
+      // Filter by search query if provided
+      const filtered = search
+        ? normalizedOperations.filter(op => 
+            op.folio?.toLowerCase().includes(search) ||
+            op.title?.toLowerCase().includes(search) ||
+            op.subtitle?.toLowerCase().includes(search) ||
+            op.categoryLabel?.toLowerCase().includes(search) ||
+            op.details?.producer?.toLowerCase().includes(search) ||
+            op.details?.customer?.toLowerCase().includes(search) ||
+            op.details?.itemName?.toLowerCase().includes(search) ||
+            op.details?.operator?.toLowerCase().includes(search)
+          )
+        : normalizedOperations;
+
+      // Slice to limit
+      const paginated = filtered.slice(0, limit);
+
+      // Aggregate high-level summary counters
+      const totalWeightKg = batches.reduce((sum, b) => sum + (b.weight_net || 0), 0);
+      const totalStockQtyMoved = inventoryLogs.reduce((sum, l) => sum + Math.abs(l.qty || 0), 0);
+      const totalPosRevenue = sales.reduce((sum, s) => sum + (s.total || 0), 0);
+
+      res.json({
+        operations: paginated,
+        totalCount: filtered.length,
+        summary: {
+          totalOperations: normalizedOperations.length,
+          weightEntriesCount: batches.length,
+          totalWeightKg,
+          stockMovementsCount: inventoryLogs.length,
+          totalStockQtyMoved,
+          posTransactionsCount: sales.length,
+          totalPosRevenue,
+          lastUpdated: new Date().toISOString()
+        }
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/operations/recent:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Analytics: 30-day citrus reception and operational cost distribution per kg
   app.get("/api/analytics/reception-30days", (req, res) => {
     try {
