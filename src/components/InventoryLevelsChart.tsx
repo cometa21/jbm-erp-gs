@@ -74,9 +74,17 @@ interface InventoryLevelsResponse {
 
 interface InventoryLevelsChartProps {
   onRefreshParent?: () => void;
+  onOpenPurchaseOrder?: () => void;
+  onOpenThresholdConfig?: () => void;
+  onOpenRestock?: () => void;
 }
 
-export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRefreshParent }) => {
+export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ 
+  onRefreshParent,
+  onOpenPurchaseOrder,
+  onOpenThresholdConfig,
+  onOpenRestock
+}) => {
   const [data, setData] = useState<InventoryLevelsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -85,6 +93,7 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'alerts_only' | 'critical_only'>('all');
   const [viewMode, setViewMode] = useState<'stock_levels' | 'health_percentage' | 'valuation'>('stock_levels');
+  const [chartSearchQuery, setChartSearchQuery] = useState('');
 
   const fetchInventoryData = async () => {
     try {
@@ -111,7 +120,7 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
     if (onRefreshParent) onRefreshParent();
   };
 
-  // Filter items based on Category and Status
+  // Filter items based on Category, Status, and Search Query
   const filteredItems = useMemo(() => {
     if (!data?.items) return [];
     return data.items.filter(item => {
@@ -124,9 +133,17 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
       if (selectedStatusFilter === 'critical_only' && item.status !== 'critical') {
         return false;
       }
+      if (chartSearchQuery.trim() !== '') {
+        const q = chartSearchQuery.toLowerCase();
+        const matchName = item.name.toLowerCase().includes(q);
+        const matchShort = item.shortName.toLowerCase().includes(q);
+        const matchSku = item.sku.toLowerCase().includes(q);
+        const matchCat = item.category.toLowerCase().includes(q);
+        if (!matchName && !matchShort && !matchSku && !matchCat) return false;
+      }
       return true;
     });
-  }, [data, selectedCategory, selectedStatusFilter]);
+  }, [data, selectedCategory, selectedStatusFilter, chartSearchQuery]);
 
   const categories = useMemo(() => {
     if (!data?.categoriesBreakdown) return [];
@@ -141,12 +158,12 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-100">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-blue-100 text-blue-900 border border-blue-300">
-              <Boxes size={13} className="text-blue-700" />
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-950 border border-emerald-300">
+              <Boxes size={13} className="text-emerald-700" />
               Almacén de Insumos & Empaques JBM
             </span>
             <span className="text-[11px] font-bold text-slate-400">
-              • Monitoreo de Existencias & Umbrales Mínimos
+              • Monitoreo de Existencias & Umbrales de Seguridad
             </span>
           </div>
           <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -159,47 +176,33 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Status Filter */}
-          <div className="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200 text-xs font-bold">
+          {onOpenThresholdConfig && (
             <button
-              onClick={() => setSelectedStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                selectedStatusFilter === 'all'
-                  ? 'bg-slate-800 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={onOpenThresholdConfig}
+              className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl text-xs transition-all border border-slate-200 active:scale-95 cursor-pointer"
+              title="Ajustar niveles de stock mínimo y crítico"
             >
-              Todos ({data?.items?.length || 0})
+              <SlidersHorizontal size={13} className="text-slate-600" />
+              <span>Configurar Umbrales</span>
             </button>
+          )}
+
+          {onOpenPurchaseOrder && (
             <button
-              onClick={() => setSelectedStatusFilter('alerts_only')}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 ${
-                selectedStatusFilter === 'alerts_only'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'text-amber-800 hover:bg-amber-100/60'
-              }`}
+              onClick={onOpenPurchaseOrder}
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all shadow-xs active:scale-95 cursor-pointer"
+              title="Generar orden de compra o requisición"
             >
-              <AlertTriangle size={12} />
-              Alertas ({health?.alertsCount || 0})
+              <TrendingDown size={13} />
+              <span>Generar Pedido ({health?.alertsCount || 0})</span>
             </button>
-            <button
-              onClick={() => setSelectedStatusFilter('critical_only')}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 ${
-                selectedStatusFilter === 'critical_only'
-                  ? 'bg-rose-600 text-white shadow-xs'
-                  : 'text-rose-700 hover:bg-rose-100/60'
-              }`}
-            >
-              <ShieldAlert size={12} />
-              Críticos ({health?.criticalCount || 0})
-            </button>
-          </div>
+          )}
 
           {/* Refresh Button */}
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl text-xs transition-all border border-slate-200 active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl text-xs transition-all border border-slate-200 active:scale-95 disabled:opacity-50 cursor-pointer"
             title="Actualizar datos de inventario"
           >
             <RefreshCw size={13} className={isRefreshing ? "animate-spin text-emerald-600" : ""} />
@@ -273,13 +276,109 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
         </div>
       </div>
 
-      {/* Category Pills & View Mode Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50/80 p-2.5 rounded-xl border border-slate-200">
+      {/* Filter Controls Row: Search + Status + Category + View Mode */}
+      <div className="space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/90 p-3 rounded-xl border border-slate-200">
+          {/* Status Filter Chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
+              <Filter size={13} />
+              Filtrar:
+            </span>
+            <button
+              onClick={() => setSelectedStatusFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                selectedStatusFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Todos ({data?.items?.length || 0})
+            </button>
+            <button
+              onClick={() => setSelectedStatusFilter('alerts_only')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedStatusFilter === 'alerts_only'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <AlertTriangle size={12} />
+              Bajo Mínimo ({health?.alertsCount || 0})
+            </button>
+            <button
+              onClick={() => setSelectedStatusFilter('critical_only')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedStatusFilter === 'critical_only'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+              }`}
+            >
+              <ShieldAlert size={12} />
+              Críticos ({health?.criticalCount || 0})
+            </button>
+          </div>
+
+          {/* Search Input */}
+          <div className="relative min-w-[200px] flex-1 max-w-xs">
+            <input
+              type="text"
+              value={chartSearchQuery}
+              onChange={(e) => setChartSearchQuery(e.target.value)}
+              placeholder="Buscar insumo (caja, PLU, fleje...)"
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+            <Filter size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            {chartSearchQuery && (
+              <button
+                onClick={() => setChartSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* View Mode Switcher */}
+          <div className="bg-white p-1 rounded-xl flex items-center border border-slate-200 text-xs font-bold">
+            <button
+              onClick={() => setViewMode('stock_levels')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'stock_levels'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Stock vs Mínimo
+            </button>
+            <button
+              onClick={() => setViewMode('health_percentage')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'health_percentage'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              % de Cobertura
+            </button>
+            <button
+              onClick={() => setViewMode('valuation')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'valuation'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Valoración ($)
+            </button>
+          </div>
+        </div>
+
         {/* Category Filter Chips */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <button
             onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               selectedCategory === 'all'
                 ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
@@ -291,9 +390,9 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
             <button
               key={c.category}
               onClick={() => setSelectedCategory(c.category)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                 selectedCategory === c.category
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-emerald-800 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
             >
@@ -306,40 +405,6 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
               )}
             </button>
           ))}
-        </div>
-
-        {/* View Mode Switcher */}
-        <div className="bg-white p-1 rounded-xl flex items-center border border-slate-200 text-xs font-bold">
-          <button
-            onClick={() => setViewMode('stock_levels')}
-            className={`px-3 py-1 rounded-lg transition-all ${
-              viewMode === 'stock_levels'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Stock vs Mínimo
-          </button>
-          <button
-            onClick={() => setViewMode('health_percentage')}
-            className={`px-3 py-1 rounded-lg transition-all ${
-              viewMode === 'health_percentage'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            % de Cobertura
-          </button>
-          <button
-            onClick={() => setViewMode('valuation')}
-            className={`px-3 py-1 rounded-lg transition-all ${
-              viewMode === 'valuation'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Valoración ($)
-          </button>
         </div>
       </div>
 
@@ -541,6 +606,73 @@ export const InventoryLevelsChart: React.FC<InventoryLevelsChartProps> = ({ onRe
           </div>
         ))}
       </div>
+
+      {/* Priority Deficit Materials Quick Strip */}
+      {data?.priorityItems && data.priorityItems.length > 0 && (
+        <div className="pt-3 border-t border-slate-200 space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+              <ShieldAlert size={14} className="text-rose-600" />
+              Insumos en Déficit / Reorden Urgente ({data.priorityItems.length})
+            </h4>
+            {onOpenPurchaseOrder && (
+              <button
+                onClick={onOpenPurchaseOrder}
+                className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
+              >
+                <span>Generar Pedido Consolidado</span>
+                <TrendingDown size={13} />
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {data.priorityItems.map(item => (
+              <div 
+                key={`priority-${item.id}`}
+                className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${
+                  item.status === 'critical' 
+                    ? 'bg-rose-50/60 border-rose-200 text-rose-950' 
+                    : 'bg-amber-50/60 border-amber-200 text-amber-950'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                      item.status === 'critical' ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                    }`}>
+                      {item.status === 'critical' ? '🔴 Riesgo Paro' : '🟡 Stock Bajo'}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500 font-mono">
+                      Faltan: {item.deficit.toLocaleString()} {item.unit}
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold truncate" title={item.name}>
+                    {item.name}
+                  </div>
+                  <div className="text-[11px] text-slate-600 font-mono mt-0.5">
+                    Existencia: <strong>{item.currentStock.toLocaleString()}</strong> / Mín: {item.minStock.toLocaleString()} {item.unit}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-[11px]">
+                  <span className="text-slate-500 truncate text-[10px]">
+                    {item.supplier}
+                  </span>
+                  {onOpenPurchaseOrder && (
+                    <button
+                      onClick={onOpenPurchaseOrder}
+                      className="px-2 py-0.5 rounded-md bg-white border border-slate-300 text-slate-800 font-bold hover:bg-slate-50 active:scale-95 cursor-pointer shrink-0"
+                    >
+                      Pedir
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

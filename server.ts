@@ -509,12 +509,23 @@ if (invCount.count === 0) {
   insertInv.run("Grapas Metálicas / Sellos para Fleje 1/2\"", "Protección & Flejado", 850, "pzas", 2000, 500, 0.85, "Flejados y Empaques Industriales", "GRP-MET-050");
   insertInv.run("Cera Cítrica Carnauba Grado Alimento", "Tratamiento Poscosecha", 16, "tambos 200L", 6, 2, 14800.00, "Agroquímica Poscosecha Veracruz", "CER-CARN-200L");
   insertInv.run("Papel Encerado Microperforado 30x30 cm", "Protección & Flejado", 550, "pliegos", 2500, 800, 0.90, "Papelera San Rafael", "PAP-ENC-3030");
+  insertInv.run("Arpilla Malla Polietileno 25 kg Verde/Amarilla", "Mallas & Arpillas", 320, "pzas", 800, 250, 8.50, "Mallas Plásticas del Centro S.A.", "MAL-ARP-25KG");
+  insertInv.run("Malla Tubular Extruida para Limón 1-2 kg", "Mallas & Arpillas", 14, "rollos 1000m", 25, 8, 420.00, "Mallas Plásticas del Centro S.A.", "MAL-TUB-1000M");
 } else {
   // Check if critical_stock is populated, if not set realistic defaults
   try {
     db.exec(`UPDATE inventory SET critical_stock = CAST(min_stock * 0.4 AS INTEGER) WHERE critical_stock IS NULL OR critical_stock = 0 OR critical_stock = 50`);
+    
+    // Ensure Mallas exist
+    const hasMalla = db.prepare("SELECT id FROM inventory WHERE item_name LIKE '%Arpilla%' OR item_name LIKE '%Malla%' LIMIT 1").get();
+    if (!hasMalla) {
+      db.prepare(`
+        INSERT INTO inventory (item_name, category, quantity, unit, min_stock, critical_stock, cost_unit, supplier, sku, lead_time_days)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run("Arpilla Malla Polietileno 25 kg Verde/Amarilla", "Mallas & Arpillas", 320, "pzas", 800, 250, 8.50, "Mallas Plásticas del Centro S.A.", "MAL-ARP-25KG", 2);
+    }
   } catch (e) {
-    console.error("Critical stock update err:", e);
+    console.error("Critical stock and malla update err:", e);
   }
 }
 
@@ -2235,12 +2246,119 @@ async function startServer() {
     }
   });
 
+  // Batch Supplier Restock / Recepción de Pedido de Insumos
+  app.post("/api/inventory/restock-batch", (req, res) => {
+    try {
+      const { 
+        supplier, 
+        invoice_folio = '', 
+        received_by = 'Almacén General', 
+        notes = '', 
+        items = [] 
+      } = req.body;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Se requiere al menos un insumo para registrar reabastecimiento." });
+      }
+
+      const restockedItems: any[] = [];
+      const logsCreated: any[] = [];
+
+      const restockTransaction = db.transaction((restockList: any[]) => {
+        for (const item of restockList) {
+          const qty = Number(item.qty) || 0;
+          if (qty <= 0) continue;
+
+          const current = db.prepare("SELECT * FROM inventory WHERE id = ?").get(item.id) as any;
+          if (!current) continue;
+
+          const prevQty = current.quantity;
+          const newQty = prevQty + qty;
+          const newCost = item.cost_unit !== undefined ? Number(item.cost_unit) : current.cost_unit;
+
+          db.prepare(`
+            UPDATE inventory 
+            SET 
+              quantity = ?,
+              cost_unit = COALESCE(?, cost_unit),
+              supplier = COALESCE(?, supplier),
+              last_restock_date = datetime('now', 'localtime')
+            WHERE id = ?
+          `).run(newQty, newCost, supplier || current.supplier, item.id);
+
+          const reasonText = invoice_folio 
+            ? `Reabastecimiento de Proveedor: ${supplier || current.supplier} • Factura/Remisión: ${invoice_folio}`
+            : `Reabastecimiento de Proveedor: ${supplier || current.supplier}`;
+
+          db.prepare(`
+            INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+            VALUES (?, ?, 'Entrada', ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+          `).run(item.id, current.item_name, qty, prevQty, newQty, notes ? `${reasonText} (${notes})` : reasonText, received_by);
+
+          restockedItems.push({
+            id: item.id,
+            item_name: current.item_name,
+            prevQty,
+            newQty,
+            addedQty: qty
+          });
+        }
+      });
+
+      restockTransaction(items);
+
+      res.json({
+        success: true,
+        restockedCount: restockedItems.length,
+        supplier,
+        invoice_folio,
+        restockedItems
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/inventory/restock-batch:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/inventory/logs", (req, res) => {
     try {
-      const logs = db.prepare("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 50").all();
+      const logs = db.prepare("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 100").all();
       res.json(logs);
     } catch (err: any) {
       console.error("Error in GET /api/inventory/logs:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/inventory/consumption-stats", (req, res) => {
+    try {
+      // Recent logs breakdown
+      const logs = db.prepare("SELECT * FROM inventory_logs ORDER BY id DESC LIMIT 200").all() as any[];
+      
+      let totalEntradas = 0;
+      let totalSalidasProd = 0;
+      let totalAjustes = 0;
+
+      logs.forEach(l => {
+        if (l.type === 'Entrada') totalEntradas += (l.qty || 0);
+        else if (l.type === 'Salida') totalSalidasProd += (l.qty || 0);
+        else totalAjustes += (l.qty || 0);
+      });
+
+      // Group by material
+      const consumptionByItem: Record<string, number> = {};
+      logs.filter(l => l.type === 'Salida').forEach(l => {
+        consumptionByItem[l.item_name] = (consumptionByItem[l.item_name] || 0) + (l.qty || 0);
+      });
+
+      res.json({
+        totalEntradas,
+        totalSalidasProd,
+        totalAjustes,
+        consumptionByItem
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/inventory/consumption-stats:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -2271,6 +2389,343 @@ async function startServer() {
       res.json({ success: true, count: updates.length, items: allItems });
     } catch (err: any) {
       console.error("Error in POST /api/inventory/configure-thresholds:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Low Stock Alerts Endpoint
+  app.get("/api/inventory/low-stock-alerts", (req, res) => {
+    try {
+      const items = db.prepare(`
+        SELECT * FROM inventory 
+        WHERE quantity <= min_stock 
+        ORDER BY 
+          CASE WHEN quantity <= critical_stock THEN 1 ELSE 2 END ASC,
+          quantity ASC
+      `).all() as any[];
+
+      const alerts = items.map(item => {
+        const isCritical = item.quantity <= (item.critical_stock || Math.round(item.min_stock * 0.4));
+        const deficit = Math.max(0, item.min_stock - item.quantity);
+        const criticalDeficit = Math.max(0, (item.critical_stock || Math.round(item.min_stock * 0.4)) - item.quantity);
+        return {
+          id: item.id,
+          item_name: item.item_name,
+          category: item.category || 'Empaque',
+          quantity: item.quantity,
+          unit: item.unit || 'pzas',
+          min_stock: item.min_stock,
+          critical_stock: item.critical_stock || Math.round(item.min_stock * 0.4),
+          status: isCritical ? 'critical' : 'low',
+          isCritical,
+          isLow: !isCritical,
+          deficit,
+          criticalDeficit,
+          supplier: item.supplier || 'Cartonera del Golfo S.A.',
+          sku: item.sku || '',
+          lead_time_days: item.lead_time_days || 3,
+          reorderSuggestedQty: Math.max(0, Math.round(item.min_stock * 1.5 - item.quantity))
+        };
+      });
+
+      res.json({
+        hasAlerts: alerts.length > 0,
+        hasCritical: alerts.some(a => a.status === 'critical'),
+        totalAlerts: alerts.length,
+        criticalCount: alerts.filter(a => a.status === 'critical').length,
+        lowCount: alerts.filter(a => a.status === 'low').length,
+        alerts
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/inventory/low-stock-alerts:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Analytics Endpoint for Recharts Inventory Levels & Thresholds
+  app.get("/api/analytics/inventory-levels", (req, res) => {
+    try {
+      const items = db.prepare(`
+        SELECT * FROM inventory 
+        ORDER BY 
+          CASE 
+            WHEN quantity <= critical_stock THEN 1
+            WHEN quantity <= min_stock THEN 2
+            ELSE 3
+          END ASC,
+          category ASC,
+          item_name ASC
+      `).all() as any[];
+
+      const categoryColors: Record<string, string> = {
+        'Cajas & Empaque': '#059669',
+        'Etiquetas & Marcaje': '#0284c7',
+        'Tarimas & Estiba': '#d97706',
+        'Protección & Flejado': '#7c3aed',
+        'Tratamiento Poscosecha': '#e11d48',
+        'Mallas & Arpillas': '#10b981',
+        'Empaque': '#0d9488'
+      };
+
+      const getShortName = (name: string): string => {
+        if (name.includes('18.14')) return 'Caja 18.14kg';
+        if (name.includes('15 kg')) return 'Caja 15kg';
+        if (name.includes('20 kg')) return 'Caja Nac 20kg';
+        if (name.includes('Telescópica')) return 'Caja 4.5kg';
+        if (name.includes('PLU #4048')) return 'PLU #4048';
+        if (name.includes('PLU #4045')) return 'PLU #4045';
+        if (name.includes('SENASICA')) return 'SENASICA QR';
+        if (name.includes('Marca Comercial')) return 'Marca JBM';
+        if (name.includes('Pallet') || name.includes('Tarima')) return 'Tarima HT';
+        if (name.includes('Esquinero')) return 'Esquineros 2m';
+        if (name.includes('Fleje')) return 'Fleje 1/2"';
+        if (name.includes('Grapas')) return 'Grapas Fleje';
+        if (name.includes('Cera')) return 'Cera Carnauba';
+        if (name.includes('Papel')) return 'Papel Encerado';
+        if (name.includes('Arpilla')) return 'Arpilla 25kg';
+        if (name.includes('Malla Tubular')) return 'Malla Tubular';
+        return name.length > 16 ? name.slice(0, 14) + '...' : name;
+      };
+
+      let totalValuation = 0;
+      let optimalCount = 0;
+      let lowCount = 0;
+      let criticalCount = 0;
+
+      const categoryMap: Record<string, { totalStock: number; totalValue: number; itemsCount: number; lowCount: number; criticalCount: number }> = {};
+
+      const processedItems = items.map(item => {
+        const crit = item.critical_stock || Math.round((item.min_stock || 100) * 0.4);
+        const min = item.min_stock || 100;
+        const current = Number(item.quantity || 0);
+        const cost = Number(item.cost_unit || 0);
+        const valuation = Number((current * cost).toFixed(2));
+        totalValuation += valuation;
+
+        let status: 'optimal' | 'low' | 'critical' = 'optimal';
+        if (current <= crit) {
+          status = 'critical';
+          criticalCount++;
+        } else if (current <= min) {
+          status = 'low';
+          lowCount++;
+        } else {
+          status = 'optimal';
+          optimalCount++;
+        }
+
+        const healthPercent = min > 0 ? Math.min(250, Math.round((current / min) * 100)) : 100;
+        const deficit = Math.max(0, min - current);
+        const cat = item.category || 'Empaque';
+
+        if (!categoryMap[cat]) {
+          categoryMap[cat] = { totalStock: 0, totalValue: 0, itemsCount: 0, lowCount: 0, criticalCount: 0 };
+        }
+        categoryMap[cat].totalStock += current;
+        categoryMap[cat].totalValue += valuation;
+        categoryMap[cat].itemsCount += 1;
+        if (status === 'critical') categoryMap[cat].criticalCount += 1;
+        if (status === 'low') categoryMap[cat].lowCount += 1;
+
+        return {
+          id: String(item.id),
+          rawId: item.id,
+          name: item.item_name,
+          shortName: getShortName(item.item_name),
+          category: cat,
+          currentStock: current,
+          minStock: min,
+          criticalStock: crit,
+          unit: item.unit || 'pzas',
+          costUnit: cost,
+          totalValuation: valuation,
+          healthPercent,
+          status,
+          deficit,
+          supplier: item.supplier || 'Cartonera del Golfo',
+          sku: item.sku || '',
+          color: categoryColors[cat] || '#059669'
+        };
+      });
+
+      const categoriesBreakdown = Object.entries(categoryMap).map(([category, vals]) => {
+        const percentageOfValue = totalValuation > 0 ? Number(((vals.totalValue / totalValuation) * 100).toFixed(1)) : 0;
+        return {
+          category,
+          totalStock: Math.round(vals.totalStock),
+          totalValue: Math.round(vals.totalValue),
+          itemsCount: vals.itemsCount,
+          lowCount: vals.lowCount,
+          criticalCount: vals.criticalCount,
+          color: categoryColors[category] || '#059669',
+          percentageOfValue
+        };
+      });
+
+      const totalItems = processedItems.length || 1;
+      const healthScore = Math.round((optimalCount / totalItems) * 100);
+
+      res.json({
+        items: processedItems,
+        priorityItems: processedItems.filter(i => i.status !== 'optimal'),
+        categoriesBreakdown,
+        healthSummary: {
+          totalItems,
+          totalValuation: Math.round(totalValuation),
+          optimalCount,
+          lowCount,
+          criticalCount,
+          healthScore,
+          alertsCount: lowCount + criticalCount
+        }
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/analytics/inventory-levels:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Production Insumos Deduct & Simulate Endpoint
+  app.post("/api/inventory/deduct-production", (req, res) => {
+    try {
+      const {
+        presentation_id,
+        presentation_name = '',
+        boxes_count = 0,
+        weight_total_kg = 0,
+        calibre = 'V-XX',
+        batch_folio = 'REC-00000',
+        operator = 'Línea de Empaque',
+        simulate_only = false
+      } = req.body;
+
+      if (boxes_count <= 0 && weight_total_kg <= 0) {
+        return res.status(400).json({ error: "Se requiere cantidad de cajas o kilos para calcular el descuento de insumos." });
+      }
+
+      const plan: {
+        search: string;
+        qty: number;
+        label: string;
+        unit: string;
+      }[] = [];
+
+      // 1. Boxes / Mallas
+      const isMallaOrArpilla = (presentation_id && presentation_id.includes('arpilla')) || 
+        presentation_name.toLowerCase().includes('arpilla') || 
+        presentation_name.toLowerCase().includes('malla');
+
+      if (isMallaOrArpilla) {
+        plan.push({ search: 'Arpilla', qty: boxes_count, label: 'Arpillas / Mallas Polietileno 25 kg', unit: 'pzas' });
+      } else if (presentation_id === 'caja_18kg' || presentation_name.includes('18.14') || presentation_name.includes('40 lbs')) {
+        plan.push({ search: '18.14', qty: boxes_count, label: 'Cajas Exportación 18.14 kg (40 lbs)', unit: 'pzas' });
+      } else if (presentation_id === 'caja_15kg' || presentation_name.includes('15 kg')) {
+        plan.push({ search: '15 kg', qty: boxes_count, label: 'Cajas Exportación 15 kg Master', unit: 'pzas' });
+      } else if (presentation_id === 'caja_20kg' || presentation_name.includes('20 kg')) {
+        plan.push({ search: '20 kg', qty: boxes_count, label: 'Cajas Nacionales 20 kg', unit: 'pzas' });
+      } else if (presentation_id === 'caja_telescopica' || presentation_name.includes('Telescópica') || presentation_name.includes('4.5')) {
+        plan.push({ search: 'Telescópica', qty: boxes_count, label: 'Cajas Telescópicas 4.5 kg Gourmet', unit: 'pzas' });
+      } else if (boxes_count > 0) {
+        plan.push({ search: 'Caja', qty: boxes_count, label: 'Cajas Corrugadas de Empaque', unit: 'pzas' });
+      }
+
+      // 2. Labels PLU & SENASICA QR
+      if (boxes_count > 0) {
+        const isPluBig = calibre === 'V-X' || calibre === 'V-XX' || calibre === 'V-XXX' || calibre.includes('-X');
+        plan.push({ search: isPluBig ? '4048' : '4045', qty: boxes_count, label: `Etiquetas PLU #${isPluBig ? '4048' : '4045'}`, unit: 'pzas' });
+        plan.push({ search: 'SENASICA', qty: boxes_count, label: 'Etiquetas Trazabilidad SENASICA / QR', unit: 'pzas' });
+      }
+
+      // 3. Pallets, Esquineros, Flejes
+      if (boxes_count >= 10) {
+        const palletsNeeded = Math.max(1, Math.ceil(boxes_count / 54));
+        plan.push({ search: 'Pallet', qty: palletsNeeded, label: 'Tarimas Madera Tratada HT (NIMF-15)', unit: 'pzas' });
+        plan.push({ search: 'Esquinero', qty: palletsNeeded * 4, label: 'Esquineros de Cartón Reforzado 2.0m', unit: 'pzas' });
+        plan.push({ search: 'Grapas', qty: palletsNeeded * 4, label: 'Grapas / Sellos Metálicos Fleje', unit: 'pzas' });
+      }
+
+      // 4. Cera Carnauba Poscosecha
+      if (weight_total_kg >= 100) {
+        const litersWax = Number(((weight_total_kg / 1000) * 0.5).toFixed(2));
+        plan.push({ search: 'Cera', qty: litersWax, label: 'Cera Cítrica Carnauba Grado Alimento', unit: 'litros' });
+      }
+
+      const executedDeductions: any[] = [];
+      const lowStockAlerts: any[] = [];
+
+      for (const itemPlan of plan) {
+        const item = db.prepare(`
+          SELECT * FROM inventory 
+          WHERE item_name LIKE ? OR category LIKE ? 
+          ORDER BY CASE WHEN item_name LIKE ? THEN 1 ELSE 2 END ASC 
+          LIMIT 1
+        `).get(`%${itemPlan.search}%`, `%${itemPlan.search}%`, `%${itemPlan.search}%`) as any;
+
+        if (item) {
+          let qtyToDeduct = itemPlan.qty;
+          if (itemPlan.search === 'Cera' && item.unit?.toLowerCase().includes('tambo')) {
+            qtyToDeduct = Number((itemPlan.qty / 200).toFixed(3));
+          }
+
+          const prev = item.quantity;
+          const next = Math.max(0, prev - qtyToDeduct);
+
+          if (!simulate_only) {
+            db.prepare("UPDATE inventory SET quantity = ? WHERE id = ?").run(next, item.id);
+            db.prepare(`
+              INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+              VALUES (?, ?, 'Salida', ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `).run(
+              item.id,
+              item.item_name,
+              qtyToDeduct,
+              prev,
+              next,
+              `Descuento Directo Producción • Lote ${batch_folio} (${boxes_count} cjs ${calibre})`,
+              operator
+            );
+          }
+
+          executedDeductions.push({
+            insumoId: item.id,
+            insumoNombre: item.item_name,
+            categoria: item.category || 'Empaque',
+            cantidadDescontada: qtyToDeduct,
+            unidad: item.unit || itemPlan.unit,
+            stockAnterior: prev,
+            stockNuevo: next
+          });
+
+          // Check if below thresholds
+          if (next <= item.min_stock) {
+            const isCritical = next <= (item.critical_stock || Math.round(item.min_stock * 0.4));
+            lowStockAlerts.push({
+              id: item.id,
+              item_name: item.item_name,
+              category: item.category || 'Empaque',
+              quantity: next,
+              unit: item.unit || itemPlan.unit,
+              min_stock: item.min_stock,
+              critical_stock: item.critical_stock || Math.round(item.min_stock * 0.4),
+              status: isCritical ? 'critical' : 'low',
+              isCritical,
+              isLow: !isCritical,
+              deficit: Math.max(0, item.min_stock - next),
+              supplier: item.supplier || 'Cartonera del Golfo S.A.',
+              lead_time_days: item.lead_time_days || 3
+            });
+          }
+        }
+      }
+
+      res.json({
+        simulated: simulate_only,
+        deducciones: executedDeductions,
+        alertasStockBajo: lowStockAlerts,
+        hasCriticalAlert: lowStockAlerts.some(a => a.status === 'critical')
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/inventory/deduct-production:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -2401,34 +2856,154 @@ async function startServer() {
         notes
       );
 
-      // Automatic BOM / Supply deductions
-      const deductions: { insumoNombre: string; cantidadDescontada: number }[] = [];
+      // Automatic BOM / Supply deductions with complete audit logging
+      const deductions: { 
+        insumoId: number; 
+        insumoNombre: string; 
+        cantidadDescontada: number; 
+        unidad: string; 
+        stockAnterior: number; 
+        stockNuevo: number 
+      }[] = [];
       const errores: { insumoNombre: string; error: string }[] = [];
 
       if (boxes_count > 0) {
-        // Deduct boxes
-        try {
-          const boxItem = db.prepare("SELECT * FROM inventory WHERE item_name LIKE '%Caja%' LIMIT 1").get() as any;
-          if (boxItem) {
-            db.prepare("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id = ?").run(boxes_count, boxItem.id);
-            deductions.push({ insumoNombre: boxItem.item_name, cantidadDescontada: boxes_count });
-          }
-        } catch (e: any) {
-          errores.push({ insumoNombre: 'Cajas', error: e.message });
-        }
+        const batchFolioStr = batch.folio || `REC-${batch.id}`;
+        const runIdStr = result.lastInsertRowid;
+        const operatorStr = operator || 'Línea de Empaque';
 
-        // Deduct pallets HT if destination is storage
-        if (boxes_count >= 20) {
-          const palletsNeeded = Math.max(1, Math.round(boxes_count / 54));
+        // Helper function for deducting and logging an inventory item
+        const deductItem = (searchQuery: string, qtyToDeduct: number, customLabel: string) => {
+          if (qtyToDeduct <= 0) return;
           try {
-            const palletItem = db.prepare("SELECT * FROM inventory WHERE item_name LIKE '%Pallet%' LIMIT 1").get() as any;
-            if (palletItem) {
-              db.prepare("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id = ?").run(palletsNeeded, palletItem.id);
-              deductions.push({ insumoNombre: palletItem.item_name, cantidadDescontada: palletsNeeded });
+            const item = db.prepare(`
+              SELECT * FROM inventory 
+              WHERE item_name LIKE ? OR category LIKE ? 
+              ORDER BY 
+                CASE WHEN item_name LIKE ? THEN 1 ELSE 2 END ASC 
+              LIMIT 1
+            `).get(`%${searchQuery}%`, `%${searchQuery}%`, `%${searchQuery}%`) as any;
+
+            if (item) {
+              const prev = item.quantity;
+              const roundedQty = typeof qtyToDeduct === 'number' ? Number(qtyToDeduct.toFixed(2)) : qtyToDeduct;
+              const next = Math.max(0, prev - roundedQty);
+
+              db.prepare("UPDATE inventory SET quantity = ? WHERE id = ?").run(next, item.id);
+
+              db.prepare(`
+                INSERT INTO inventory_logs (item_id, item_name, type, qty, prev_qty, new_qty, reason, user, date)
+                VALUES (?, ?, 'Salida', ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+              `).run(
+                item.id,
+                item.item_name,
+                roundedQty,
+                prev,
+                next,
+                `Consumo Automático en Producción • Corrida #${runIdStr} • Lote ${batchFolioStr} (${boxes_count} Cajas ${calibre})`,
+                operatorStr
+              );
+
+              deductions.push({
+                insumoId: item.id,
+                insumoNombre: item.item_name,
+                cantidadDescontada: roundedQty,
+                unidad: item.unit || 'pzas',
+                stockAnterior: prev,
+                stockNuevo: next
+              });
             }
           } catch (e: any) {
-            errores.push({ insumoNombre: 'Pallets HT', error: e.message });
+            errores.push({ insumoNombre: customLabel, error: e.message });
           }
+        };
+
+        // 1. Deduct Specific Packaging Box / Malla
+        let boxSearchTerm = 'Caja';
+        const isMallaOrArpilla = (presentation_id && presentation_id.includes('arpilla')) || 
+          (presentation_name && presentation_name.toLowerCase().includes('arpilla')) || 
+          (presentation_name && presentation_name.toLowerCase().includes('malla'));
+
+        if (isMallaOrArpilla) {
+          boxSearchTerm = 'Arpilla';
+        } else if (presentation_id === 'caja_18kg' || presentation_name?.includes('18.14') || presentation_name?.includes('40 lbs')) {
+          boxSearchTerm = '18.14';
+        } else if (presentation_id === 'caja_15kg' || presentation_name?.includes('15 kg')) {
+          boxSearchTerm = '15 kg';
+        } else if (presentation_id === 'caja_20kg' || presentation_name?.includes('20 kg')) {
+          boxSearchTerm = '20 kg';
+        } else if (presentation_id === 'caja_telescopica' || presentation_name?.includes('Telescópica') || presentation_name?.includes('4.5')) {
+          boxSearchTerm = 'Telescópica';
+        }
+
+        deductItem(boxSearchTerm, boxes_count, isMallaOrArpilla ? 'Arpillas / Mallas de Empaque' : 'Cajas de Empaque');
+
+        // 2. Deduct Labels (PLU / Senasica QR)
+        const isPluBig = calibre === 'V-X' || calibre === 'V-XX' || calibre === 'V-XXX' || calibre.includes('-X');
+        const labelSearchTerm = isPluBig ? '4048' : '4045';
+        deductItem(labelSearchTerm, boxes_count, `Etiquetas PLU #${isPluBig ? '4048' : '4045'}`);
+        deductItem('SENASICA', boxes_count, 'Etiquetas Trazabilidad SENASICA / QR');
+
+        // 3. Deduct Pallets HT NIMF-15 (Standard ~54 boxes per pallet)
+        if (boxes_count >= 10) {
+          const palletsNeeded = Math.max(1, Math.ceil(boxes_count / 54));
+          deductItem('Pallet', palletsNeeded, 'Tarimas / Pallets HT');
+
+          // 4. Deduct Corner Protectors (4 per pallet)
+          const cornerProtectors = palletsNeeded * 4;
+          deductItem('Esquinero', cornerProtectors, 'Esquineros de Cartón');
+
+          // 5. Deduct Strapping / Fleje Seals (Grapas)
+          const sealsCount = palletsNeeded * 4;
+          deductItem('Grapas', sealsCount, 'Grapas Metálicas Fleje');
+        }
+
+        // 6. Post-harvest Carnauba Wax (approx 0.5L per 1,000kg fruit)
+        if (weight_total_kg >= 100) {
+          const litersWax = Number(((weight_total_kg / 1000) * 0.5).toFixed(2));
+          // If wax is in tambos (200L), adjust fraction
+          try {
+            const waxItem = db.prepare("SELECT * FROM inventory WHERE item_name LIKE '%Cera%' LIMIT 1").get() as any;
+            if (waxItem) {
+              const isTambo = waxItem.unit?.toLowerCase().includes('tambo');
+              const waxDeduction = isTambo ? Number((litersWax / 200).toFixed(3)) : litersWax;
+              if (waxDeduction > 0) {
+                deductItem('Cera', waxDeduction, 'Cera Cítrica Grado Alimento');
+              }
+            }
+          } catch (err: any) {
+            console.error("Wax deduction error:", err);
+          }
+        }
+      }
+
+      // Collect low stock alerts on all affected items
+      const lowStockAlerts: any[] = [];
+      for (const d of deductions) {
+        try {
+          const item = db.prepare("SELECT * FROM inventory WHERE id = ?").get(d.insumoId) as any;
+          if (item && item.quantity <= item.min_stock) {
+            const isCritical = item.quantity <= (item.critical_stock || Math.round(item.min_stock * 0.4));
+            lowStockAlerts.push({
+              id: item.id,
+              item_name: item.item_name,
+              category: item.category || 'Empaque',
+              quantity: item.quantity,
+              unit: item.unit || 'pzas',
+              min_stock: item.min_stock,
+              critical_stock: item.critical_stock || Math.round(item.min_stock * 0.4),
+              status: isCritical ? 'critical' : 'low',
+              isCritical,
+              isLow: !isCritical,
+              deficit: Math.max(0, item.min_stock - item.quantity),
+              criticalDeficit: Math.max(0, (item.critical_stock || Math.round(item.min_stock * 0.4)) - item.quantity),
+              supplier: item.supplier || 'Cartonera del Golfo S.A.',
+              lead_time_days: item.lead_time_days || 3,
+              reorderSuggestedQty: Math.max(0, Math.round(item.min_stock * 1.5 - item.quantity))
+            });
+          }
+        } catch (alertErr) {
+          console.error("Alert detection err:", alertErr);
         }
       }
 
@@ -2450,6 +3025,8 @@ async function startServer() {
         record: inserted,
         deducciones: deductions,
         errores: errores,
+        alertasStockBajo: lowStockAlerts,
+        hasCriticalAlert: lowStockAlerts.some(a => a.status === 'critical'),
         kilosDisponiblesRestantes: Math.max(0, availableKg - weight_total_kg)
       });
     } catch (err: any) {

@@ -49,6 +49,37 @@ export interface InventoryItem {
   sku?: string;
   lead_time_days?: number;
   last_restock_date?: string;
+  status?: 'optimal' | 'low' | 'critical';
+  isCritical?: boolean;
+  isLow?: boolean;
+  deficit?: number;
+  criticalDeficit?: number;
+  reorderSuggestedQty?: number;
+}
+
+export interface SupplyDeduction {
+  insumoId: number;
+  insumoNombre: string;
+  cantidadDescontada: number;
+  unidad: string;
+  stockAnterior: number;
+  stockNuevo: number;
+  categoria?: string;
+}
+
+export interface LowStockAlert {
+  id: number;
+  item_name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  min_stock: number;
+  critical_stock: number;
+  status: 'critical' | 'low';
+  deficit: number;
+  supplier: string;
+  lead_time_days?: number;
+  reorderSuggestedQty?: number;
 }
 
 export interface InventoryLog {
@@ -472,6 +503,9 @@ export interface SalesReportFilter {
 }
 
 export interface SalesReportData {
+  monthName?: string;
+  year?: number;
+  folio?: string;
   period?: string;
   periodLabel: string;
   startDate?: string;
@@ -585,5 +619,63 @@ export interface MonthlyBalanceData {
   batchesCount?: number;
   producersCount?: number;
 }
+
+export interface MonthlyProductionReportData {
+  monthName: string;
+  year: number;
+  periodLabel: string;
+  folio: string;
+  plantName: string;
+  generatedDate: string;
+  generatedBy?: string;
+  // High level KPIs
+  totalReceivedKg: number;
+  totalProcessedKg: number;
+  totalPackedKg: number;
+  totalBoxesPacked: number;
+  efficiencyYieldPercent: number; // e.g. 94.8%
+  totalDiscardKg: number;
+  discardPercent: number; // e.g. 5.2%
+  productionRunsCount: number;
+  batchesProcessedCount: number;
+  // Breakdown by calibre, color & presentation
+  calibreBreakdown: {
+    calibre: string;
+    color: 'verde' | 'alimonado' | 'amarillo';
+    quality: string;
+    presentation: string;
+    boxesCount: number;
+    weightKg: number;
+    percentage: number;
+    avgCostPerBox?: number;
+  }[];
+  // Breakdown by destination
+  destinationBreakdown: {
+    destination: string;
+    label: string;
+    boxesCount: number;
+    weightKg: number;
+    percentage: number;
+  }[];
+  // Discards / Mermas breakdown
+  discardReasons: {
+    type: string;
+    kg: number;
+    impactPercent: number;
+    trend: string;
+    notes?: string;
+  }[];
+  // Packaging materials consumed
+  suppliesConsumed: {
+    item_name: string;
+    quantity: number;
+    unit: string;
+    category: string;
+  }[];
+  // Historical / recent runs list
+  runsList?: ProductionRecord[];
+}
+
+export type MonthlySalesReportData = SalesReportData;
 
 

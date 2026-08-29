@@ -23,7 +23,10 @@ import {
   BarChart2,
   Sparkles,
   ChevronRight,
-  TrendingDown
+  TrendingDown,
+  TrendingUp,
+  Truck,
+  Factory
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { InventoryItem, InventoryLog } from '../types';
@@ -33,19 +36,29 @@ import { SuppliesMovementModal } from './SuppliesMovementModal';
 import { SuppliesPurchaseOrderModal } from './SuppliesPurchaseOrderModal';
 import { SuppliesItemModal } from './SuppliesItemModal';
 import { SuppliesNotificationModal } from './SuppliesNotificationModal';
+import { SuppliesProductionSimulator } from './SuppliesProductionSimulator';
+import { SuppliesRestockModal } from './SuppliesRestockModal';
+import { InventoryLevelsChart } from './InventoryLevelsChart';
 
 export function Supplies() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [logs, setLogs] = useState<InventoryLog[]>([]);
+  const [consumptionStats, setConsumptionStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'catalog' | 'chart' | 'simulator' | 'traceability'>('catalog');
+  const [showChartInCatalog, setShowChartInCatalog] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('todos');
   const [activeAlertFilter, setActiveAlertFilter] = useState<'all' | 'critical' | 'low' | 'optimal'>('all');
+  const [logFilterType, setLogFilterType] = useState<'all' | 'production' | 'supplier' | 'adjust'>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
 
   // Modals state
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
+  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
 
@@ -57,9 +70,10 @@ export function Supplies() {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [invRes, logsRes] = await Promise.all([
+      const [invRes, logsRes, statsRes] = await Promise.all([
         fetch('/api/inventory'),
-        fetch('/api/inventory/logs')
+        fetch('/api/inventory/logs'),
+        fetch('/api/inventory/consumption-stats')
       ]);
 
       if (invRes.ok) {
@@ -70,6 +84,11 @@ export function Supplies() {
       if (logsRes.ok) {
         const logsData = await logsRes.json();
         setLogs(logsData);
+      }
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setConsumptionStats(statsData);
       }
     } catch (error) {
       console.error('Error loading inventory data:', error);
@@ -123,6 +142,38 @@ export function Supplies() {
     return ['todos', ...Array.from(set)];
   }, [items]);
 
+  // Filtered Logs for Traceability Tab
+  const filteredLogs = useMemo(() => {
+    return logs.filter(log => {
+      if (logFilterType === 'production') {
+        const reason = (log.reason || '').toLowerCase();
+        if (!reason.includes('producción') && !reason.includes('empaque') && !reason.includes('corrida') && log.type !== 'Salida') {
+          return false;
+        }
+      } else if (logFilterType === 'supplier') {
+        const reason = (log.reason || '').toLowerCase();
+        if (!reason.includes('proveedor') && !reason.includes('recepción') && !reason.includes('remisión') && !reason.includes('factura') && log.type !== 'Entrada') {
+          return false;
+        }
+      } else if (logFilterType === 'adjust') {
+        if (log.type !== 'Ajuste' && !log.reason?.toLowerCase().includes('ajuste') && !log.reason?.toLowerCase().includes('merma')) {
+          return false;
+        }
+      }
+
+      if (logSearchQuery.trim() !== '') {
+        const q = logSearchQuery.toLowerCase();
+        return (
+          log.item_name.toLowerCase().includes(q) ||
+          (log.reason && log.reason.toLowerCase().includes(q)) ||
+          (log.user && log.user.toLowerCase().includes(q))
+        );
+      }
+
+      return true;
+    });
+  }, [logs, logFilterType, logSearchQuery]);
+
   // Quick Action Handlers
   const handleOpenMovement = (item: InventoryItem, type: 'Entrada' | 'Salida' | 'Ajuste') => {
     setMovementItem(item);
@@ -170,14 +221,14 @@ export function Supplies() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-              Inventario de Insumos y Empaque
+              Inventario de Insumos & Empaque JBM
             </h1>
-            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-wider">
-              Control Poscosecha
+            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-wider border border-emerald-200">
+              Control Poscosecha & BOM
             </span>
           </div>
           <p className="text-sm text-slate-500 font-medium mt-0.5">
-            Monitoreo en tiempo real de cajas, etiquetas, tarimas, flejes y suministros críticos para empaque
+            Monitoreo en tiempo real de cajas, etiquetas, tarimas, cera y sincronización con corridas de producción
           </p>
         </div>
 
@@ -185,11 +236,11 @@ export function Supplies() {
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
             type="button"
-            onClick={() => setIsThresholdModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+            onClick={() => setIsRestockModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl border-2 border-emerald-600 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 text-xs font-black flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
           >
-            <Sliders size={15} className="text-slate-500" />
-            <span>Configurar Umbrales</span>
+            <Truck size={16} className="text-emerald-700" />
+            <span>Recepción Proveedor (Entrada)</span>
           </button>
 
           <button 
@@ -204,7 +255,7 @@ export function Supplies() {
           <button 
             type="button"
             onClick={handleAddNewItem}
-            className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs flex items-center gap-2 shadow-sm transition-transform hover:scale-102 cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs flex items-center gap-2 shadow-sm transition-transform hover:scale-102 cursor-pointer"
           >
             <Plus size={16} />
             <span>Nuevo Insumo</span>
@@ -212,15 +263,73 @@ export function Supplies() {
         </div>
       </header>
 
-      {/* 1. CENTRAL VISUAL ALERTS BANNER */}
-      <SuppliesAlertsBanner
-        items={items}
-        onOpenThresholdConfig={() => setIsThresholdModalOpen(true)}
-        onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
-        onOpenNotificationConfig={() => setIsNotificationModalOpen(true)}
-        onFilterCritical={() => setActiveAlertFilter('critical')}
-        activeFilter={activeAlertFilter}
-      />
+      {/* VIEW TABS SWITCHER */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setActiveTab('catalog')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'catalog'
+              ? 'bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-700/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Package size={16} />
+          <span>Catálogo & Existencias ({items.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('chart')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'chart'
+              ? 'bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-700/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <BarChart2 size={16} className={activeTab === 'chart' ? 'text-emerald-200' : 'text-slate-500'} />
+          <span>Dashboard Visual (Recharts)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('simulator')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'simulator'
+              ? 'bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-700/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Factory size={16} />
+          <span>Simulador BOM Producción ↔ Insumos</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('traceability')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'traceability'
+              ? 'bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-700/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <History size={16} />
+          <span>Trazabilidad: Consumo vs. Reabastecimiento</span>
+        </button>
+      </div>
+
+      {/* TAB 1: CATALOG & REAL-TIME STOCK */}
+      {activeTab === 'catalog' && (
+        <div className="space-y-6">
+          {/* 1. CENTRAL VISUAL ALERTS BANNER */}
+          <SuppliesAlertsBanner
+            items={items}
+            onOpenThresholdConfig={() => setIsThresholdModalOpen(true)}
+            onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
+            onOpenNotificationConfig={() => setIsNotificationModalOpen(true)}
+            onFilterCritical={() => setActiveAlertFilter('critical')}
+            activeFilter={activeAlertFilter}
+          />
 
       {/* 2. FILTERS, SEARCH & STATUS TABS */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
@@ -279,18 +388,46 @@ export function Supplies() {
             </button>
           </div>
 
-          {/* Search Box */}
-          <div className="relative w-full lg:w-72">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar caja, etiqueta, SKU..."
-              className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white transition-all"
-            />
+          {/* Search Box & Chart Inline Toggle */}
+          <div className="flex items-center gap-2 w-full lg:w-auto">
+            <div className="relative flex-1 lg:w-72">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar caja, etiqueta, SKU..."
+                className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white transition-all"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowChartInCatalog(!showChartInCatalog)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border cursor-pointer shrink-0 ${
+                showChartInCatalog 
+                  ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs' 
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+              title="Alternar panel visual de Recharts dentro del catálogo"
+            >
+              <BarChart2 size={15} />
+              <span className="hidden sm:inline">{showChartInCatalog ? 'Ocultar Gráfica' : 'Ver Gráfica Recharts'}</span>
+            </button>
           </div>
         </div>
+
+        {/* Inline Chart View if toggled */}
+        {showChartInCatalog && (
+          <div className="pt-2 border-t border-slate-100">
+            <InventoryLevelsChart
+              onRefreshParent={fetchData}
+              onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
+              onOpenThresholdConfig={() => setIsThresholdModalOpen(true)}
+              onOpenRestock={() => setIsRestockModalOpen(true)}
+            />
+          </div>
+        )}
 
         {/* Category Horizontal Filter Tags */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-slate-100 pt-3 text-xs">
@@ -514,95 +651,226 @@ export function Supplies() {
           })}
         </div>
       )}
+    </div>
+  )}
 
-      {/* 4. RECENT MOVEMENTS LOG */}
-      <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
-              <History size={18} />
-            </div>
-            <div>
-              <h3 className="text-base font-black text-slate-900 tracking-tight">
-                Bitácora de Movimientos de Almacén
-              </h3>
+      {/* TAB: VISUAL RECHARTS DASHBOARD */}
+      {activeTab === 'chart' && (
+        <div className="space-y-6">
+          <InventoryLevelsChart
+            onRefreshParent={fetchData}
+            onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
+            onOpenThresholdConfig={() => setIsThresholdModalOpen(true)}
+            onOpenRestock={() => setIsRestockModalOpen(true)}
+          />
+        </div>
+      )}
+
+      {/* TAB 2: BOM PACKAGING SIMULATOR & CAPACITY CALCULATION */}
+      {activeTab === 'simulator' && (
+        <SuppliesProductionSimulator
+          items={items}
+          onOpenPurchaseOrder={() => setIsPurchaseModalOpen(true)}
+          onRefreshData={fetchData}
+        />
+      )}
+
+      {/* TAB 3: TRACEABILITY: CONSUMPTION VS RESTOCKING */}
+      {activeTab === 'traceability' && (
+        <div className="space-y-6">
+          {/* Metrics Overview Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-black uppercase text-emerald-700">
+                <span>Reabastecimientos (Entradas)</span>
+                <TrendingUp size={16} />
+              </div>
+              <div className="text-2xl font-black font-mono text-slate-900">
+                +{consumptionStats?.entradasMes?.toLocaleString('es-MX') || '0'} <span className="text-xs font-bold text-slate-400">pzas recibidas</span>
+              </div>
               <p className="text-xs text-slate-500 font-medium">
-                Registro histórico de entradas, consumos de empaque y ajustes de inventario
+                {consumptionStats?.entradasCount || '0'} recepciones de proveedor este mes
+              </p>
+            </div>
+
+            <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-black uppercase text-rose-700">
+                <span>Consumo en Empaque (Salidas)</span>
+                <TrendingDown size={16} />
+              </div>
+              <div className="text-2xl font-black font-mono text-slate-900">
+                -{consumptionStats?.salidasProduccionMes?.toLocaleString('es-MX') || '0'} <span className="text-xs font-bold text-slate-400">pzas consumidas</span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium">
+                Descontadas automáticamente por corridas de producción
+              </p>
+            </div>
+
+            <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-black uppercase text-amber-700">
+                <span>Ajustes & Mermas</span>
+                <RefreshCw size={16} />
+              </div>
+              <div className="text-2xl font-black font-mono text-slate-900">
+                {consumptionStats?.ajustesCount || '0'} <span className="text-xs font-bold text-slate-400">movimientos</span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium">
+                Alineación física y control de tarimas dañadas
               </p>
             </div>
           </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-slate-50 text-slate-500 uppercase font-black tracking-wider text-[10px]">
-              <tr>
-                <th className="py-3 px-4 rounded-l-xl">Material</th>
-                <th className="py-3 px-3">Tipo</th>
-                <th className="py-3 px-3 text-right">Cantidad</th>
-                <th className="py-3 px-3 text-right">Stock Anterior → Nuevo</th>
-                <th className="py-3 px-4">Motivo / Concepto</th>
-                <th className="py-3 px-3">Responsable</th>
-                <th className="py-3 px-4 rounded-r-xl text-right">Fecha / Hora</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {logs.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
-                    No hay registros de movimientos recientes
-                  </td>
-                </tr>
-              ) : (
-                logs.slice(0, 15).map((log) => {
-                  const isEntrada = log.type === 'Entrada';
-                  const isSalida = log.type === 'Salida';
+          {/* Audit Log Table */}
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                  <History size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">
+                    Trazabilidad de Movimientos de Insumos
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Historial auditado de consumos de línea de empaque y recepciones de proveedor
+                  </p>
+                </div>
+              </div>
 
-                  return (
-                    <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 font-bold text-slate-900">
-                        {log.item_name}
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
-                          isEntrada 
-                            ? 'bg-emerald-100 text-emerald-800' 
-                            : isSalida 
-                              ? 'bg-rose-100 text-rose-800' 
-                              : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {isEntrada ? <ArrowDownRight size={11} /> : isSalida ? <ArrowUpRight size={11} /> : <RefreshCw size={10} />}
-                          {log.type}
-                        </span>
-                      </td>
-                      <td className={`py-3.5 px-3 text-right font-mono font-black text-sm ${
-                        isEntrada ? 'text-emerald-700' : isSalida ? 'text-rose-700' : 'text-amber-700'
-                      }`}>
-                        {isEntrada ? '+' : isSalida ? '-' : ''}{log.qty.toLocaleString('es-MX')}
-                      </td>
-                      <td className="py-3.5 px-3 text-right font-mono text-slate-500 text-xs">
-                        {log.prev_qty !== undefined ? `${log.prev_qty} → ${log.new_qty}` : 'N/A'}
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-600 font-medium max-w-xs truncate">
-                        {log.reason || 'Movimiento estándar'}
-                      </td>
-                      <td className="py-3.5 px-3 text-slate-700 font-bold text-xs">
-                        {log.user || 'Almacén'}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-[11px]">
-                        {log.date}
+              {/* Fast Filter Buttons */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLogFilterType('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    logFilterType === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Todos ({logs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogFilterType('production')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    logFilterType === 'production' ? 'bg-rose-700 text-white' : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                  }`}
+                >
+                  Consumo Producción
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogFilterType('supplier')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    logFilterType === 'supplier' ? 'bg-emerald-700 text-white' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                  }`}
+                >
+                  Reabastecimiento Proveedor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogFilterType('adjust')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    logFilterType === 'adjust' ? 'bg-amber-700 text-white' : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                  }`}
+                >
+                  Ajustes Manuales
+                </button>
+              </div>
+            </div>
+
+            {/* Search filter for logs */}
+            <div className="relative">
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={logSearchQuery}
+                onChange={(e) => setLogSearchQuery(e.target.value)}
+                placeholder="Buscar por insumo, lote de empaque, remisión, operador..."
+                className="w-full h-10 pl-9 pr-4 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            {/* Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 text-slate-500 uppercase font-black tracking-wider text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4 rounded-l-xl">Material</th>
+                    <th className="py-3 px-3">Tipo</th>
+                    <th className="py-3 px-3 text-right">Cantidad</th>
+                    <th className="py-3 px-3 text-right">Stock Anterior → Nuevo</th>
+                    <th className="py-3 px-4">Motivo / Corrida / Proveedor</th>
+                    <th className="py-3 px-3">Responsable</th>
+                    <th className="py-3 px-4 rounded-r-xl text-right">Fecha / Hora</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
+                        No se encontraron registros con los filtros seleccionados
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ) : (
+                    filteredLogs.map((log) => {
+                      const isEntrada = log.type === 'Entrada';
+                      const isSalida = log.type === 'Salida';
+
+                      return (
+                        <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3.5 px-4 font-bold text-slate-900">
+                            {log.item_name}
+                          </td>
+                          <td className="py-3.5 px-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                              isEntrada 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : isSalida 
+                                  ? 'bg-rose-100 text-rose-800' 
+                                  : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {isEntrada ? <ArrowDownRight size={11} /> : isSalida ? <ArrowUpRight size={11} /> : <RefreshCw size={10} />}
+                              {log.type}
+                            </span>
+                          </td>
+                          <td className={`py-3.5 px-3 text-right font-mono font-black text-sm ${
+                            isEntrada ? 'text-emerald-700' : isSalida ? 'text-rose-700' : 'text-amber-700'
+                          }`}>
+                            {isEntrada ? '+' : isSalida ? '-' : ''}{log.qty.toLocaleString('es-MX')}
+                          </td>
+                          <td className="py-3.5 px-3 text-right font-mono text-slate-500 text-xs">
+                            {log.prev_qty !== undefined ? `${log.prev_qty} → ${log.new_qty}` : 'N/A'}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-700 font-medium max-w-sm">
+                            <span className="line-clamp-2">{log.reason || 'Movimiento estándar'}</span>
+                          </td>
+                          <td className="py-3.5 px-3 text-slate-700 font-bold text-xs">
+                            {log.user || 'Almacén'}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-[11px]">
+                            {log.date}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* MODALS */}
-      {/* 1. Thresholds Configuration Modal */}
+      {/* 1. Supplier Multi-Item Restock Modal */}
+      <SuppliesRestockModal
+        isOpen={isRestockModalOpen}
+        onClose={() => setIsRestockModalOpen(false)}
+        items={items}
+        onSuccess={fetchData}
+      />
+
+      {/* 2. Thresholds Configuration Modal */}
       <SuppliesThresholdModal
         isOpen={isThresholdModalOpen}
         onClose={() => setIsThresholdModalOpen(false)}
@@ -610,14 +878,14 @@ export function Supplies() {
         onSaveSuccess={fetchData}
       />
 
-      {/* 2. Purchase Order / Requisition Modal */}
+      {/* 3. Purchase Order / Requisition Modal */}
       <SuppliesPurchaseOrderModal
         isOpen={isPurchaseModalOpen}
         onClose={() => setIsPurchaseModalOpen(false)}
         items={items}
       />
 
-      {/* 3. Add / Edit Supply Item Modal */}
+      {/* 4. Add / Edit Supply Item Modal */}
       <SuppliesItemModal
         isOpen={isItemModalOpen}
         onClose={() => setIsItemModalOpen(false)}
@@ -625,7 +893,7 @@ export function Supplies() {
         onSuccess={fetchData}
       />
 
-      {/* 4. Movement (In/Out/Adjust) Modal */}
+      {/* 5. Movement (In/Out/Adjust) Modal */}
       <SuppliesMovementModal
         isOpen={isMovementModalOpen}
         onClose={() => setIsMovementModalOpen(false)}
@@ -634,7 +902,7 @@ export function Supplies() {
         onSuccess={fetchData}
       />
 
-      {/* 5. Browser Background Notifications Modal */}
+      {/* 6. Browser Background Notifications Modal */}
       <SuppliesNotificationModal
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}

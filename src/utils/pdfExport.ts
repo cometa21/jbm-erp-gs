@@ -1,6 +1,15 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Batch, Settlement, Producer, SalesReportData, MonthlyBalanceData, POSSale } from '../types';
+import { 
+  Batch, 
+  Settlement, 
+  Producer, 
+  SalesReportData, 
+  MonthlyBalanceData, 
+  POSSale,
+  MonthlyProductionReportData,
+  MonthlySalesReportData
+} from '../types';
 
 export interface ReportFilterOptions {
   producerName?: string;
@@ -2778,6 +2787,750 @@ export function generateMonthlyBalancePdf(balance: MonthlyBalanceData) {
   }
 
   const filename = `Balance_Mensual_JBM_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+// ----------------------------------------------------------------------
+// 10. GENERATE MONTHLY SALES REPORT PDF (REPORTE MENSUAL DE VENTAS)
+// ----------------------------------------------------------------------
+export function generateMonthlySalesReportPdf(report: MonthlySalesReportData) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'letter'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const dateStr = report.generatedDate ? report.generatedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const folioStr = report.period ? `REP-VTA-${report.period.toUpperCase()}-${dateStr.replace(/-/g, '')}` : `REP-VTA-MEN-${dateStr.replace(/-/g, '')}`;
+
+  // Official JBM Corporate Header with Logo
+  drawCorporateHeader(
+    doc,
+    'REPORTE MENSUAL DE VENTAS',
+    folioStr,
+    dateStr,
+    pageWidth,
+    margin
+  );
+
+  let currentY = 32;
+
+  // Filter and Period Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 13, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(6, 78, 59); // Emerald 900
+  doc.text('PERÍODO ANALIZADO:', margin + 3.5, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.periodLabel || `${report.startDate || ''} al ${report.endDate || dateStr}`, margin + 36, currentY + 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('GENERADO POR:', margin + 110, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.generatedBy || 'Departamento de Finanzas & Comercial JBM', margin + 134, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Consolidado oficial de ventas comerciales, desplazamiento por canal de distribución, dispersión de cobranza y volumen despachado.', margin + 3.5, currentY + 9.5);
+
+  currentY += 16;
+
+  // Executive KPI summary cards (4 Columns)
+  const kpiWidth = (pageWidth - (margin * 2) - 9) / 4;
+  const kpiHeight = 16;
+
+  const totalRev = report.totalRevenue || report.summary?.totalRevenue || 0;
+  const totalKg = report.totalKgSold || report.summary?.totalKg || 0;
+  const totalBoxes = report.totalBoxesSold || report.summary?.totalBoxes || 0;
+  const totalTickets = report.totalTickets || report.summary?.totalTransactions || 0;
+  const avgTicket = report.avgTicketValue || (totalTickets > 0 ? totalRev / totalTickets : 0);
+  const totalDiscounts = report.totalDiscounts || report.summary?.totalDiscounts || 0;
+
+  const kpis = [
+    {
+      title: 'FACTURACIÓN MENSUAL',
+      value: `$${totalRev.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `${totalTickets.toLocaleString()} transacciones emitidas`,
+      bg: [236, 253, 245], // emerald-50
+      border: [16, 185, 129], // emerald-500
+      valColor: [4, 120, 87]
+    },
+    {
+      title: 'VOLUMEN DESPLAZADO',
+      value: `${totalKg.toLocaleString('es-MX')} kg`,
+      subtitle: `${(totalKg / 1000).toFixed(2)} Toneladas de fruta`,
+      bg: [239, 246, 255], // blue-50
+      border: [59, 130, 246], // blue-500
+      valColor: [29, 78, 216]
+    },
+    {
+      title: 'CAJAS DESPACHADAS',
+      value: `${totalBoxes.toLocaleString('es-MX')} cjs`,
+      subtitle: 'Exportación y Mercado Nacional',
+      bg: [254, 243, 199], // amber-50
+      border: [245, 158, 11], // amber-500
+      valColor: [180, 83, 9]
+    },
+    {
+      title: 'TICKET PROMEDIO',
+      value: `$${avgTicket.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subtitle: `Descuentos: $${totalDiscounts.toLocaleString('es-MX')}`,
+      bg: [245, 243, 255], // purple-50
+      border: [139, 92, 246], // purple-500
+      valColor: [109, 40, 217]
+    }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = margin + (idx * (kpiWidth + 3));
+    doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
+    doc.setDrawColor(kpi.border[0], kpi.border[1], kpi.border[2]);
+    doc.roundedRect(kX, currentY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(kpi.title, kX + 2.5, currentY + 4.2);
+
+    doc.setFontSize(8.2);
+    doc.setTextColor(kpi.valColor[0], kpi.valColor[1], kpi.valColor[2]);
+    doc.text(kpi.value, kX + 2.5, currentY + 9.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.subtitle, kX + 2.5, currentY + 13.5);
+  });
+
+  currentY += kpiHeight + 5;
+
+  // Table 1: Top Calibres & Presentaciones
+  if (report.topProducts && report.topProducts.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('DESGLOSE DE VENTAS POR CALIBRE Y PRESENTACIÓN', margin, currentY + 3.5);
+
+    const productRows = report.topProducts.map(p => [
+      p.name,
+      p.calibre || '-',
+      p.boxesSold ? `${p.boxesSold.toLocaleString()} cjs` : '-',
+      `${(p.kgSold || 0).toLocaleString('es-MX')} kg`,
+      `${(p.volumePercent || 0).toFixed(1)}%`,
+      `$${(p.revenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Presentación / Calibre',
+        'Calibre',
+        'Cajas Vendidas',
+        'Kilos Netos',
+        '% Vol.',
+        'Facturación Total (MXN)'
+      ]],
+      body: productRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [6, 78, 59], // Emerald 900
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 70 },
+        1: { halign: 'center', cellWidth: 20 },
+        2: { halign: 'right', cellWidth: 26 },
+        3: { halign: 'right', cellWidth: 26 },
+        4: { halign: 'center', cellWidth: 18 },
+        5: { halign: 'right', cellWidth: 32, fontStyle: 'bold', textColor: [4, 120, 87] }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Table 2: Desglose por Canal de Clientes & Métodos de Pago
+  if (report.customerTypes && report.customerTypes.length > 0) {
+    if (currentY > pageHeight - 75) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('PARTICIPACIÓN POR CANAL DE DISTRIBUCIÓN Y CLIENTES', margin, currentY + 3.5);
+
+    const channelRows = report.customerTypes.map(c => [
+      c.label || c.type,
+      `${c.count || 0} compras`,
+      c.boxes ? `${c.boxes.toLocaleString()} cjs` : '-',
+      `${(c.kg || 0).toLocaleString('es-MX')} kg`,
+      `${(c.percentage || 0).toFixed(1)}%`,
+      `$${(c.revenue || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Segmento / Canal de Clientes',
+        'Transacciones',
+        'Cajas',
+        'Volumen (Kg)',
+        'Participación',
+        'Monto Facturado (MXN)'
+      ]],
+      body: channelRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [30, 41, 59], // Slate 800
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 65 },
+        1: { halign: 'center', cellWidth: 25 },
+        2: { halign: 'right', cellWidth: 22 },
+        3: { halign: 'right', cellWidth: 26 },
+        4: { halign: 'center', cellWidth: 22 },
+        5: { halign: 'right', cellWidth: 32, fontStyle: 'bold', textColor: [29, 78, 216] }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Table 3: Métodos de Pago y Cobranza
+  if (report.paymentMethods && report.paymentMethods.length > 0) {
+    if (currentY > pageHeight - 65) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('CONCILIACIÓN POR FORMA DE COBRO Y TESORERÍA', margin, currentY + 3.5);
+
+    const pmRows = report.paymentMethods.map(pm => [
+      pm.method,
+      `${pm.count} operaciones`,
+      `${(pm.percentage || 0).toFixed(1)}%`,
+      `$${(pm.amount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Método / Vía de Pago',
+        'Número de Movimientos',
+        'Porcentaje Cobrado',
+        'Total Ingresado (MXN)'
+      ]],
+      body: pmRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [180, 83, 9], // Amber 700
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 75 },
+        1: { halign: 'center', cellWidth: 35 },
+        2: { halign: 'center', cellWidth: 35 },
+        3: { halign: 'right', cellWidth: 47, fontStyle: 'bold', textColor: [4, 120, 87] }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // Signatures
+  if (currentY > pageHeight - 35) {
+    doc.addPage();
+    currentY = 20;
+  }
+
+  const sigWidth = 55;
+  const sigY = pageHeight - 24;
+
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin + 15, sigY, margin + 15 + sigWidth, sigY);
+  doc.line(pageWidth - margin - 15 - sigWidth, sigY, pageWidth - margin - 15, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('GERENCIA COMERCIAL & VENTAS', margin + 15 + (sigWidth / 2), sigY + 3.5, { align: 'center' });
+  doc.text('DIRECCIÓN GENERAL / FINANZAS', pageWidth - margin - 15 - (sigWidth / 2), sigY + 3.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Validación comercial y auditoría de ingresos', margin + 15 + (sigWidth / 2), sigY + 6.5, { align: 'center' });
+  doc.text('JBM Cítricos S.A. de C.V.', pageWidth - margin - 15 - (sigWidth / 2), sigY + 6.5, { align: 'center' });
+
+  // Page Footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('JBM CÍTRICOS S.A. DE C.V. • REPORTE MENSUAL DE VENTAS • WWW.JBMCITRICOS.COM', margin, pageHeight - 3.8);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 3.8, { align: 'right' });
+  }
+
+  const filename = `Reporte_Mensual_Ventas_JBM_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+// ----------------------------------------------------------------------
+// 11. GENERATE MONTHLY PRODUCTION REPORT PDF (REPORTE MENSUAL DE PRODUCCIÓN Y EMPAQUE)
+// ----------------------------------------------------------------------
+export function generateMonthlyProductionReportPdf(report: MonthlyProductionReportData) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'letter'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const dateStr = report.generatedDate ? report.generatedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const folioStr = report.folio || `REP-PROD-${report.year}-${String(report.monthName).toUpperCase()}`;
+
+  // Official JBM Corporate Header with Logo
+  drawCorporateHeader(
+    doc,
+    'REPORTE MENSUAL DE PRODUCCIÓN',
+    folioStr,
+    dateStr,
+    pageWidth,
+    margin
+  );
+
+  let currentY = 32;
+
+  // Header & Facility Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 13, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(6, 78, 59); // Emerald 900
+  doc.text('PERÍODO DE PRODUCCIÓN:', margin + 3.5, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.periodLabel || `${report.monthName} ${report.year}`, margin + 42, currentY + 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('INSTALACIÓN / PLANTA:', margin + 110, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+  doc.text(report.plantName || 'Planta Empaque Pedernales, Ver.', margin + 143, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Informe técnico de proceso, clasificación por calibre/color, rendimiento de selección empaque, mermas y auditoría de insumos. Responsable: ${report.generatedBy || 'Carlos Barragán'}.`, margin + 3.5, currentY + 9.5);
+
+  currentY += 16;
+
+  // Executive KPI summary cards (4 Columns)
+  const kpiWidth = (pageWidth - (margin * 2) - 9) / 4;
+  const kpiHeight = 16;
+
+  const kpis = [
+    {
+      title: 'FRUTA PROCESADA (KG)',
+      value: `${(report.totalProcessedKg || 0).toLocaleString('es-MX')} kg`,
+      subtitle: `${((report.totalProcessedKg || 0) / 1000).toFixed(2)} Toneladas corridas`,
+      bg: [236, 253, 245], // emerald-50
+      border: [16, 185, 129], // emerald-500
+      valColor: [4, 120, 87]
+    },
+    {
+      title: 'TOTAL CAJAS EMPACADAS',
+      value: `${(report.totalBoxesPacked || 0).toLocaleString('es-MX')} cjs`,
+      subtitle: `${Math.round((report.totalBoxesPacked || 0) / 54)} Tarimas / Pallets HT`,
+      bg: [239, 246, 255], // blue-50
+      border: [59, 130, 246], // blue-500
+      valColor: [29, 78, 216]
+    },
+    {
+      title: 'RENDIMIENTO / YIELD',
+      value: `${(report.efficiencyYieldPercent || 94.5).toFixed(1)}%`,
+      subtitle: 'Aprovechamiento 1ra y 2da',
+      bg: [254, 243, 199], // amber-50
+      border: [245, 158, 11], // amber-500
+      valColor: [180, 83, 9]
+    },
+    {
+      title: 'MERMA & MOLINO',
+      value: `${(report.totalDiscardKg || 0).toLocaleString('es-MX')} kg`,
+      subtitle: `Impacto: ${(report.discardPercent || 5.5).toFixed(1)}% del volumen`,
+      bg: [255, 241, 242], // rose-50
+      border: [244, 63, 94], // rose-500
+      valColor: [190, 18, 60]
+    }
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = margin + (idx * (kpiWidth + 3));
+    doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
+    doc.setDrawColor(kpi.border[0], kpi.border[1], kpi.border[2]);
+    doc.roundedRect(kX, currentY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(kpi.title, kX + 2.5, currentY + 4.2);
+
+    doc.setFontSize(8.2);
+    doc.setTextColor(kpi.valColor[0], kpi.valColor[1], kpi.valColor[2]);
+    doc.text(kpi.value, kX + 2.5, currentY + 9.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.subtitle, kX + 2.5, currentY + 13.5);
+  });
+
+  currentY += kpiHeight + 5;
+
+  // Table 1: Clasificación de Producción por Calibre, Color y Presentación
+  if (report.calibreBreakdown && report.calibreBreakdown.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('CLASIFICACIÓN DE PRODUCCIÓN POR CALIBRE, COLOR Y CALIDAD', margin, currentY + 3.5);
+
+    const calibreRows = report.calibreBreakdown.map(c => [
+      c.calibre,
+      c.color === 'verde' ? 'Verde (Exportación)' : c.color === 'alimonado' ? 'Alimonado (Nacional)' : 'Amarillo (Molino / Ind.)',
+      c.quality === 'primera' ? '1ra Calidad Selecta' : c.quality === 'segunda' ? '2da Calidad Estándar' : 'Industria / Molino',
+      c.presentation,
+      c.boxesCount ? `${c.boxesCount.toLocaleString()} cjs` : '-',
+      `${(c.weightKg || 0).toLocaleString('es-MX')} kg`,
+      `${(c.percentage || 0).toFixed(1)}%`
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Calibre',
+        'Color / Selección',
+        'Calidad',
+        'Presentación / Empaque',
+        'Cajas',
+        'Kilos Netos',
+        '% Rendimiento'
+      ]],
+      body: calibreRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [6, 78, 59], // Emerald 900
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 20 },
+        1: { cellWidth: 36 },
+        2: { cellWidth: 32 },
+        3: { cellWidth: 44 },
+        4: { halign: 'right', cellWidth: 20 },
+        5: { halign: 'right', cellWidth: 22, fontStyle: 'bold' },
+        6: { halign: 'center', cellWidth: 18, fontStyle: 'bold', textColor: [4, 120, 87] }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Table 2: Distribución por Destino Operativo
+  if (report.destinationBreakdown && report.destinationBreakdown.length > 0) {
+    if (currentY > pageHeight - 75) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('DISTRIBUCIÓN Y UBICACIÓN OPERATIVA DE FRUTA EMPACADA', margin, currentY + 3.5);
+
+    const destRows = report.destinationBreakdown.map(d => [
+      d.label || d.destination,
+      d.boxesCount ? `${d.boxesCount.toLocaleString()} cjs` : '-',
+      `${(d.weightKg || 0).toLocaleString('es-MX')} kg`,
+      `${(d.percentage || 0).toFixed(1)}%`,
+      d.destination === 'camara_fria' ? 'Temperatura 4.0°C - Conservación' : 
+      d.destination === 'piso_empaque' ? 'Estiba en Tarimas para Carga Inmediata' :
+      d.destination === 'transporte_directo' ? 'Carga Directa a Caja Refrigerada' : 'Extracción Industrial de Jugo'
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Destino / Área de Planta',
+        'Cajas',
+        'Volumen (Kg)',
+        'Participación',
+        'Estatus / Control Térmico'
+      ]],
+      body: destRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [30, 41, 59], // Slate 800
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 46 },
+        1: { halign: 'right', cellWidth: 22 },
+        2: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+        3: { halign: 'center', cellWidth: 24 },
+        4: { cellWidth: 74, textColor: [100, 116, 139] }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Table 3: Auditoría de Mermas y Descartes Fitosanitarios
+  if (report.discardReasons && report.discardReasons.length > 0) {
+    if (currentY > pageHeight - 65) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(190, 18, 60);
+    doc.text('AUDITORÍA DE DESCARTE Y CONTROL DE MERMA EN LÍNEA', margin, currentY + 3.5);
+
+    const discardRows = report.discardReasons.map(d => [
+      d.type,
+      `${(d.kg || 0).toLocaleString('es-MX')} kg`,
+      `${(d.impactPercent || 0).toFixed(1)}%`,
+      d.trend || 'Estable',
+      d.notes || 'Revisión en tolva de recepción y selección óptica'
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Causa de Descarte / Fitosanidad',
+        'Kilos Afectados',
+        '% Impacto s/ Total',
+        'Tendencia',
+        'Acción Correctiva / Huerto'
+      ]],
+      body: discardRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [190, 18, 60], // Rose 800
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 55 },
+        1: { halign: 'right', cellWidth: 26, fontStyle: 'bold', textColor: [190, 18, 60] },
+        2: { halign: 'center', cellWidth: 25 },
+        3: { halign: 'center', cellWidth: 22 },
+        4: { cellWidth: 64, textColor: [100, 116, 139] }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+  }
+
+  // Table 4: Consumo de Insumos y Materiales de Empaque (BOM)
+  if (report.suppliesConsumed && report.suppliesConsumed.length > 0) {
+    if (currentY > pageHeight - 65) {
+      doc.addPage();
+      currentY = 15;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(6, 78, 59);
+    doc.text('BALANCE DE INSUMOS Y MATERIALES DE EMPAQUE CONSUMIDOS', margin, currentY + 3.5);
+
+    const supplyRows = report.suppliesConsumed.map(s => [
+      s.item_name,
+      s.category,
+      `${(s.quantity || 0).toLocaleString('es-MX')}`,
+      s.unit
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [[
+        'Insumo / Material de Empaque',
+        'Categoría',
+        'Cantidad Consumida',
+        'Unidad de Medida'
+      ]],
+      body: supplyRows,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.4,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        font: 'helvetica',
+        textColor: [30, 41, 59]
+      },
+      headStyles: {
+        fillColor: [4, 120, 87], // Emerald 700
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 6.8
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 80 },
+        1: { cellWidth: 42 },
+        2: { halign: 'right', cellWidth: 35, fontStyle: 'bold', textColor: [4, 120, 87] },
+        3: { halign: 'center', cellWidth: 35 }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // Signatures
+  if (currentY > pageHeight - 35) {
+    doc.addPage();
+    currentY = 20;
+  }
+
+  const sigWidth = 50;
+  const sigY = pageHeight - 24;
+
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin + 6, sigY, margin + 6 + sigWidth, sigY);
+  doc.line(margin + (pageWidth - (margin * 2)) / 2 - (sigWidth / 2), sigY, margin + (pageWidth - (margin * 2)) / 2 + (sigWidth / 2), sigY);
+  doc.line(pageWidth - margin - 6 - sigWidth, sigY, pageWidth - margin - 6, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.2);
+  doc.setTextColor(30, 41, 59);
+  doc.text('JEFATURA DE PRODUCCIÓN', margin + 6 + (sigWidth / 2), sigY + 3.5, { align: 'center' });
+  doc.text('CONTROL DE CALIDAD / SENASICA', margin + (pageWidth - (margin * 2)) / 2, sigY + 3.5, { align: 'center' });
+  doc.text('DIRECCIÓN DE OPERACIONES', pageWidth - margin - 6 - (sigWidth / 2), sigY + 3.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.2);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Supervisión de línea y calibrado', margin + 6 + (sigWidth / 2), sigY + 6.5, { align: 'center' });
+  doc.text('Inspección fitosanitaria y lotes', margin + (pageWidth - (margin * 2)) / 2, sigY + 6.5, { align: 'center' });
+  doc.text('JBM Cítricos S.A. de C.V.', pageWidth - margin - 6 - (sigWidth / 2), sigY + 6.5, { align: 'center' });
+
+  // Page Footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 7, pageWidth - margin, pageHeight - 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('JBM CÍTRICOS S.A. DE C.V. • REPORTE MENSUAL DE PRODUCCIÓN Y EMPAQUE • WWW.JBMCITRICOS.COM', margin, pageHeight - 3.8);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 3.8, { align: 'right' });
+  }
+
+  const filename = `Reporte_Mensual_Produccion_JBM_${dateStr}.pdf`;
   doc.save(filename);
 }
 

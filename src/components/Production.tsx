@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Package,
   Factory,
@@ -31,9 +32,10 @@ import {
   Info
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import type { Batch, ProductionRecord, ProductionPresentation, DiscardReportRow } from '../types';
+import type { Batch, ProductionRecord, ProductionPresentation, DiscardReportRow, SupplyDeduction, LowStockAlert } from '../types';
 import { Logo } from './Logo';
 import { ProductionBatchYieldTracker } from './ProductionBatchYieldTracker';
+import { ProductionLowStockModal } from './ProductionLowStockModal';
 
 // --- SISTEMA DE CALIBRES CITRÍCOLAS ESTANDARIZADOS POR COLOR ---
 export const CALIBRES_POR_COLOR = {
@@ -90,6 +92,8 @@ function getColorGroupLabel(cal: string): { label: string; emoji: string } {
 }
 
 export function Production() {
+  const navigate = useNavigate();
+
   // Data states
   const [batches, setBatches] = useState<Batch[]>([]);
   const [productionRuns, setProductionRuns] = useState<ProductionRecord[]>([]);
@@ -124,6 +128,23 @@ export function Production() {
 
   // Modals & Printable Label state
   const [showDiscardModal, setShowDiscardModal] = useState<boolean>(false);
+  const [lowStockModalData, setLowStockModalData] = useState<{
+    isOpen: boolean;
+    batchFolio: string;
+    calibre: string;
+    boxesCount: number;
+    weightKg: number;
+    deductions: SupplyDeduction[];
+    lowStockAlerts: LowStockAlert[];
+  }>({
+    isOpen: false,
+    batchFolio: '',
+    calibre: '',
+    boxesCount: 0,
+    weightKg: 0,
+    deductions: [],
+    lowStockAlerts: []
+  });
   const [discardForm, setDiscardForm] = useState({
     batch_id: '',
     type: 'Mancha de Trips / Ácaro (Daño Superficial)',
@@ -370,11 +391,26 @@ export function Production() {
         ? `Insumos descontados: ${responseData.deducciones.map((d: any) => `${d.insumoNombre} (-${d.cantidadDescontada})`).join(', ')}`
         : '';
 
+      const hasAlerts = responseData.alertasStockBajo && responseData.alertasStockBajo.length > 0;
+
       setFeedback({
-        type: 'success',
-        title: 'Producción Registrada Exitosamente',
+        type: hasAlerts ? 'info' : 'success',
+        title: hasAlerts ? 'Producción Registrada • Alerta de Stock' : 'Producción Registrada Exitosamente',
         message: `Lote: ${selectedBatch.folio} • ${kilosSolicitados.toFixed(2)} kg procesados en ${selectedCalibre}. ${deductionsText}`
       });
+
+      // Show interactive low stock & deduction modal
+      if ((responseData.deducciones && responseData.deducciones.length > 0) || hasAlerts) {
+        setLowStockModalData({
+          isOpen: true,
+          batchFolio: selectedBatch.folio || `REC-${selectedBatch.id}`,
+          calibre: selectedCalibre,
+          boxesCount: numCajas,
+          weightKg: kilosSolicitados,
+          deductions: responseData.deducciones || [],
+          lowStockAlerts: responseData.alertasStockBajo || []
+        });
+      }
 
       // Reset fields
       setBoxesCount('');
@@ -1362,6 +1398,19 @@ export function Production() {
           </div>
         </div>
       )}
+
+      {/* Production Low Stock & Deduction Modal */}
+      <ProductionLowStockModal
+        isOpen={lowStockModalData.isOpen}
+        onClose={() => setLowStockModalData(prev => ({ ...prev, isOpen: false }))}
+        batchFolio={lowStockModalData.batchFolio}
+        calibre={lowStockModalData.calibre}
+        boxesCount={lowStockModalData.boxesCount}
+        weightKg={lowStockModalData.weightKg}
+        deductions={lowStockModalData.deductions}
+        lowStockAlerts={lowStockModalData.lowStockAlerts}
+        onNavigateToSupplies={() => navigate('/insumos')}
+      />
     </div>
   );
 }
