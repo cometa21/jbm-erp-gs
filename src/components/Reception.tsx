@@ -40,7 +40,7 @@ import { ThermalTicket, type TicketData } from './ThermalTicket';
 import { ThermalReceiptPreview, type WeighInReceiptData } from './ThermalReceiptPreview';
 import { Logo } from './Logo';
 import { calculateReceptionTotals } from '../utils/receptionCalculations';
-import { saveCloudBatch } from '../lib/cloudService';
+import { saveCloudBatch, getCloudBatches, deleteCloudBatch } from '../lib/cloudService';
 import {
   getOfflineBatches,
   getOfflineBatchesAsync,
@@ -153,13 +153,14 @@ export function Reception() {
     }
   }, []);
 
-  // Load Data with IndexedDB Offline Fallback
+  // Load Data with IndexedDB Offline Fallback and Cloud Firestore Persistence
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [prodsRes, batRes] = await Promise.allSettled([
+      const [prodsRes, batRes, cloudBatchesRes] = await Promise.allSettled([
         fetch('/api/producers').then(res => res.ok ? res.json() : []),
-        fetch('/api/batches').then(res => res.ok ? res.json() : [])
+        fetch('/api/batches').then(res => res.ok ? res.json() : []),
+        getCloudBatches()
       ]);
 
       let loadedProducers: Producer[] = [];
@@ -174,9 +175,23 @@ export function Reception() {
         loadedProducers = await getCachedProducersFromIndexedDB();
       }
 
-      if (batRes.status === 'fulfilled' && Array.isArray(batRes.value) && batRes.value.length > 0) {
-        loadedBatches = batRes.value;
-        // Cachear histórico en IndexedDB
+      const serverList: Batch[] = (batRes.status === 'fulfilled' && Array.isArray(batRes.value)) ? batRes.value : [];
+      const cloudList: Batch[] = (cloudBatchesRes.status === 'fulfilled' && Array.isArray(cloudBatchesRes.value)) ? cloudBatchesRes.value : [];
+
+      // Merge server and cloud batches, ensuring Firestore persisted batches are prioritized
+      const batchMap = new Map<string, Batch>();
+      for (const b of serverList) {
+        const key = b.folio || `ID-${b.id}`;
+        batchMap.set(key, b);
+      }
+      for (const b of cloudList) {
+        const key = b.folio || `ID-${b.id}`;
+        batchMap.set(key, b);
+      }
+      loadedBatches = Array.from(batchMap.values());
+      loadedBatches.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      if (loadedBatches.length > 0) {
         cacheServerBatchesInIndexedDB(loadedBatches);
       } else {
         // Fallback desde histórico IndexedDB
@@ -664,6 +679,11 @@ export function Reception() {
             if (!res.ok) {
               const errData = await res.json();
               throw new Error(errData.error || 'Error al eliminar');
+            }
+            try {
+              await deleteCloudBatch(batch.folio || batch.id);
+            } catch (cloudErr) {
+              console.warn('Could not delete from cloud:', cloudErr);
             }
             fetchData();
             await refreshMetrics();

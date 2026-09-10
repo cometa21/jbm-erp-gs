@@ -9,6 +9,7 @@ import {
 import { POSThermalTicket } from './POSThermalTicket';
 import { POSBarcodeScanner } from './POSBarcodeScanner';
 import { POSDiscountModal, DiscountResult } from './POSDiscountModal';
+import { saveCloudPOSSale } from '../../lib/cloudService';
 
 interface POSTabVentasProps {
   currentRole: POSUserRole;
@@ -528,6 +529,18 @@ export const POSTabVentas: React.FC<POSTabVentasProps> = ({ currentRole }) => {
       }
 
       const saleData: POSSale = await res.json();
+
+      // Mirror and persist sale in Cloud Firestore
+      try {
+        await saveCloudPOSSale({
+          ...saleData,
+          items_json: JSON.stringify(cart),
+          date: saleData.date || new Date().toISOString()
+        });
+      } catch (cloudErr) {
+        console.warn('POS Sale Firestore mirror notice:', cloudErr);
+      }
+
       setCompletedSale(saleData);
       setCheckoutModalOpen(false);
       clearCart();

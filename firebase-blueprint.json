@@ -6,18 +6,91 @@
       "type": "object",
       "properties": {
         "folio": { "type": "string", "description": "Folio de recepción" },
+        "scale_ticket_folio": { "type": "string", "description": "Folio físico de báscula" },
         "producer_id": { "type": "string", "description": "ID del productor" },
         "producer_name": { "type": "string", "description": "Nombre del productor" },
+        "origin": { "type": "string", "description": "Origen de la fruta" },
         "orchard": { "type": "string", "description": "Nombre del huerto" },
-        "driver_name": { "type": "string", "description": "Nombre del chofer" },
-        "plates": { "type": "string", "description": "Placas del vehículo" },
+        "variety": { "type": "string", "description": "Variedad de cítrico" },
+        "quality": { "type": "string", "description": "Calidad estándar o exportación" },
         "weight_gross": { "type": "number", "description": "Peso bruto en kg" },
-        "weight_tara": { "type": "number", "description": "Peso tara en kg" },
+        "weight_tare": { "type": "number", "description": "Peso tara en kg" },
         "weight_net": { "type": "number", "description": "Peso neto en kg" },
+        "price_per_kg": { "type": "number", "description": "Precio por kg en MXN" },
+        "subtotal": { "type": "number", "description": "Subtotal en MXN" },
+        "scale_fee": { "type": "number", "description": "Cuota de báscula en MXN" },
+        "scale_fee_payment": { "type": "string", "description": "Forma de pago de báscula" },
+        "extra_charge_per_kg": { "type": "number", "description": "Cargo extra por kg" },
+        "extra_charge_total": { "type": "number", "description": "Total cargos operativos" },
+        "total": { "type": "number", "description": "Total liquidado en MXN" },
+        "status": { "type": "string", "description": "Estado del lote" },
+        "operator": { "type": "string", "description": "Operador de báscula" },
         "date": { "type": "string", "description": "Fecha de recepción ISO" },
-        "status": { "type": "string", "description": "Estado del lote" }
+        "notes": { "type": "string", "description": "Observaciones" }
       },
       "required": ["folio", "producer_name", "weight_net", "date"]
+    },
+    "ProductionRun": {
+      "title": "ProductionRun",
+      "description": "Corrida o registro de empaque y selección de cítricos",
+      "type": "object",
+      "properties": {
+        "batch_id": { "type": "number", "description": "ID del lote fuente" },
+        "batch_folio": { "type": "string", "description": "Folio del lote" },
+        "calibre": { "type": "string", "description": "Calibre clasificado (ej. V-XX)" },
+        "color": { "type": "string", "description": "Color de selección (verde, alimonado, amarillo)" },
+        "quality": { "type": "string", "description": "Calidad asignada" },
+        "presentation_id": { "type": "string", "description": "Identificador de presentación" },
+        "presentation_name": { "type": "string", "description": "Nombre de la presentación o caja" },
+        "boxes_count": { "type": "number", "description": "Número de cajas empacadas" },
+        "weight_total_kg": { "type": "number", "description": "Kilos totales procesados" },
+        "destination": { "type": "string", "description": "Destino (cámara fría, piso empaque, molino)" },
+        "operator": { "type": "string", "description": "Operador responsable" },
+        "cost_total": { "type": "number", "description": "Costo total estimado MXN" },
+        "cost_per_box": { "type": "number", "description": "Costo por caja MXN" },
+        "date": { "type": "string", "description": "Fecha y hora de registro ISO" },
+        "notes": { "type": "string", "description": "Observaciones de corrida" }
+      },
+      "required": ["calibre", "weight_total_kg", "date"]
+    },
+    "ProductionDiscard": {
+      "title": "ProductionDiscard",
+      "description": "Registro de merma o descarte fitosanitario en selección",
+      "type": "object",
+      "properties": {
+        "batch_id": { "type": "number", "description": "ID del lote" },
+        "batch_folio": { "type": "string", "description": "Folio del lote" },
+        "type": { "type": "string", "description": "Tipo o causa de merma" },
+        "kg": { "type": "number", "description": "Kilogramos descartados" },
+        "impact_percent": { "type": "number", "description": "Porcentaje de impacto" },
+        "trend": { "type": "string", "description": "Tendencia observada" },
+        "date": { "type": "string", "description": "Fecha y hora del registro ISO" },
+        "notes": { "type": "string", "description": "Notas técnicas" }
+      },
+      "required": ["type", "kg", "date"]
+    },
+    "SaleRecord": {
+      "title": "SaleRecord",
+      "description": "Registro de venta o ticket comercial en mostrador o mayorista",
+      "type": "object",
+      "properties": {
+        "folio": { "type": "string", "description": "Folio de venta" },
+        "customer_name": { "type": "string", "description": "Nombre del cliente" },
+        "customer_type": { "type": "string", "description": "Tipo de cliente" },
+        "items_count": { "type": "number", "description": "Cantidad de partidas" },
+        "items_json": { "type": "string", "description": "Detalle de partidas serializado" },
+        "subtotal": { "type": "number", "description": "Subtotal en MXN" },
+        "discount_amount": { "type": "number", "description": "Monto de descuento MXN" },
+        "tax_amount": { "type": "number", "description": "Impuestos MXN" },
+        "total": { "type": "number", "description": "Monto total MXN" },
+        "payment_method": { "type": "string", "description": "Método de pago utilizado" },
+        "cash_received": { "type": "number", "description": "Efectivo entregado por cliente" },
+        "cash_change": { "type": "number", "description": "Cambio devuelto" },
+        "operator": { "type": "string", "description": "Cajero u operador" },
+        "status": { "type": "string", "description": "Estado de la transacción" },
+        "date": { "type": "string", "description": "Fecha y hora de venta ISO" }
+      },
+      "required": ["folio", "total", "date"]
     },
     "InventoryItem": {
       "title": "InventoryItem",
@@ -31,24 +104,25 @@
         "min_stock": { "type": "number", "description": "Nivel de stock mínimo" },
         "critical_stock": { "type": "number", "description": "Nivel de stock crítico" },
         "cost_unit": { "type": "number", "description": "Costo unitario MXN" },
-        "sku": { "type": "string", "description": "Código SKU" }
+        "supplier": { "type": "string", "description": "Proveedor" },
+        "sku": { "type": "string", "description": "Código SKU" },
+        "last_restock_date": { "type": "string", "description": "Fecha de última reposición ISO" }
       },
       "required": ["item_name", "quantity", "unit"]
     },
-    "SaleRecord": {
-      "title": "SaleRecord",
-      "description": "Venta o ticket en punto de venta POS",
+    "Producer": {
+      "title": "Producer",
+      "description": "Productor o citricultor registrado",
       "type": "object",
       "properties": {
-        "folio": { "type": "string", "description": "Folio de venta" },
-        "customer_name": { "type": "string", "description": "Nombre del cliente" },
-        "total": { "type": "number", "description": "Monto total MXN" },
-        "subtotal": { "type": "number", "description": "Subtotal MXN" },
-        "tax": { "type": "number", "description": "IVA MXN" },
-        "payment_method": { "type": "string", "description": "Método de pago" },
-        "date": { "type": "string", "description": "Fecha y hora de venta ISO" }
+        "name": { "type": "string", "description": "Nombre completo o razón social" },
+        "rfc": { "type": "string", "description": "RFC del productor" },
+        "phone": { "type": "string", "description": "Teléfono de contacto" },
+        "location": { "type": "string", "description": "Ubicación o localidad" },
+        "default_orchard": { "type": "string", "description": "Huerto predeterminado" },
+        "balance": { "type": "number", "description": "Saldo en cuenta corriente MXN" }
       },
-      "required": ["folio", "total", "date"]
+      "required": ["name"]
     }
   },
   "firestore": {
@@ -56,13 +130,29 @@
       "schema": "Batch",
       "description": "Colección de lotes recibidos en báscula"
     },
+    "/production_runs/{runId}": {
+      "schema": "ProductionRun",
+      "description": "Colección de corridas de empaque y clasificación"
+    },
+    "/production_discards/{discardId}": {
+      "schema": "ProductionDiscard",
+      "description": "Colección de registros de merma y descarte fitosanitario"
+    },
+    "/sales/{saleId}": {
+      "schema": "SaleRecord",
+      "description": "Colección de transacciones de venta generales"
+    },
+    "/pos_sales/{saleId}": {
+      "schema": "SaleRecord",
+      "description": "Colección de tickets y órdenes cerradas en punto de venta POS"
+    },
     "/inventory/{itemId}": {
       "schema": "InventoryItem",
       "description": "Colección de insumos y materiales"
     },
-    "/sales/{saleId}": {
-      "schema": "SaleRecord",
-      "description": "Colección de transacciones de venta"
+    "/producers/{producerId}": {
+      "schema": "Producer",
+      "description": "Catálogo de productores citrícolas"
     }
   }
 }

@@ -73,6 +73,7 @@ import {
   generateMonthlySalesReportPdf,
   generateMonthlyProductionReportPdf
 } from '../utils/pdfExport';
+import { getCloudBatches, getCloudPOSSales } from '../lib/cloudService';
 
 export function Finances() {
   const [settlements, setSettlements] = React.useState<Settlement[]>([]);
@@ -170,25 +171,44 @@ export function Finances() {
       .then(data => setProducers(Array.isArray(data) ? data : []))
       .catch(err => console.error('Error loading producers:', err));
 
-    fetch('/api/batches')
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setBatches(Array.isArray(data) ? data : []))
-      .catch(err => console.error('Error loading batches:', err));
+    Promise.allSettled([
+      fetch('/api/batches').then(res => res.ok ? res.json() : []),
+      getCloudBatches()
+    ]).then(([localRes, cloudRes]) => {
+      const serverList = (localRes.status === 'fulfilled' && Array.isArray(localRes.value)) ? localRes.value : [];
+      const cloudList = (cloudRes.status === 'fulfilled' && Array.isArray(cloudRes.value)) ? cloudRes.value : [];
+      const batchMap = new Map<string, Batch>();
+      for (const b of serverList) batchMap.set(b.folio || `ID-${b.id}`, b);
+      for (const b of cloudList) batchMap.set(b.folio || `ID-${b.id}`, b);
+      const merged = Array.from(batchMap.values());
+      merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setBatches(merged);
+    }).catch(err => console.error('Error loading batches:', err));
 
     fetch('/api/settings')
       .then(res => res.ok ? res.json() : null)
       .then(data => { if (data) setCompanySettings(data); })
       .catch(() => {});
 
-    // Load POS Analytics & Sales
+    // Load POS Analytics & Sales with Firestore persistence
     setIsLoadingPos(true);
     Promise.all([
       fetch('/api/pos/analytics?days=30').then(r => r.ok ? r.json() : null),
       fetch('/api/pos/sales').then(r => r.ok ? r.json() : []),
-      fetch('/api/pos/expenses').then(r => r.ok ? r.json() : [])
-    ]).then(([analyticsData, salesData, expensesData]) => {
+      fetch('/api/pos/expenses').then(r => r.ok ? r.json() : []),
+      getCloudPOSSales()
+    ]).then(([analyticsData, salesData, expensesData, cloudSalesData]) => {
       if (analyticsData) setPosAnalytics(analyticsData);
-      if (Array.isArray(salesData)) setPosSales(salesData);
+      
+      const serverSales: POSSale[] = Array.isArray(salesData) ? salesData : [];
+      const cloudSales: POSSale[] = Array.isArray(cloudSalesData) ? cloudSalesData : [];
+      const salesMap = new Map<string, POSSale>();
+      for (const s of serverSales) salesMap.set(s.folio || `ID-${s.id}`, s);
+      for (const s of cloudSales) salesMap.set(s.folio || `ID-${s.id}`, s);
+      const mergedSales = Array.from(salesMap.values());
+      mergedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setPosSales(mergedSales);
+
       if (Array.isArray(expensesData)) setPosExpenses(expensesData);
     }).catch(err => {
       console.error('Error loading POS finance data:', err);

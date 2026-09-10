@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { TopNavbar } from './components/TopNavbar';
@@ -18,8 +18,13 @@ import { Finances } from './components/Finances';
 import { Documents } from './components/Documents';
 import { SettingsPage } from './components/SettingsPage';
 import { ThemeProvider } from './context/ThemeContext';
+import { ensureFirestoreInitialized } from './lib/cloudService';
 
 export default function App() {
+  useEffect(() => {
+    ensureFirestoreInitialized();
+  }, []);
+
   return (
     <ThemeProvider>
       <Router>

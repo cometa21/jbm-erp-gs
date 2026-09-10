@@ -36,6 +36,12 @@ import type { Batch, ProductionRecord, ProductionPresentation, DiscardReportRow,
 import { Logo } from './Logo';
 import { ProductionBatchYieldTracker } from './ProductionBatchYieldTracker';
 import { ProductionLowStockModal } from './ProductionLowStockModal';
+import { 
+  saveCloudProductionRun, 
+  getCloudProductionRuns, 
+  saveCloudDiscard, 
+  getCloudDiscards 
+} from '../lib/cloudService';
 
 // --- SISTEMA DE CALIBRES CITRÍCOLAS ESTANDARIZADOS POR COLOR ---
 export const CALIBRES_POR_COLOR = {
@@ -168,36 +174,58 @@ export function Production() {
     operator: string;
   } | null>(null);
 
-  // Fetch all production data
+  // Fetch all production data with Firestore persistence
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [batchesRes, prodRes, kpiRes, discardsRes] = await Promise.all([
+      const [batchesRes, prodRes, kpiRes, discardsRes, cloudRunsRes, cloudDiscardsRes] = await Promise.allSettled([
         fetch('/api/batches').then(r => r.ok ? r.json() : []),
         fetch('/api/production').then(r => r.ok ? r.json() : []),
         fetch('/api/production/kpis').then(r => r.ok ? r.json() : null),
-        fetch('/api/production/discards').then(r => r.ok ? r.json() : [])
+        fetch('/api/production/discards').then(r => r.ok ? r.json() : []),
+        getCloudProductionRuns(),
+        getCloudDiscards()
       ]);
 
-      const loadedBatches = Array.isArray(batchesRes) ? batchesRes : [];
+      const loadedBatches = (batchesRes.status === 'fulfilled' && Array.isArray(batchesRes.value)) ? batchesRes.value : [];
       setBatches(loadedBatches);
-      setProductionRuns(Array.isArray(prodRes) ? prodRes : []);
-      setDiscards(Array.isArray(discardsRes) ? discardsRes : []);
 
-      if (kpiRes) {
+      // Merge server runs and cloud runs
+      const serverRuns: ProductionRecord[] = (prodRes.status === 'fulfilled' && Array.isArray(prodRes.value)) ? prodRes.value : [];
+      const cloudRuns: ProductionRecord[] = (cloudRunsRes.status === 'fulfilled' && Array.isArray(cloudRunsRes.value)) ? cloudRunsRes.value : [];
+      const runMap = new Map<string, ProductionRecord>();
+      for (const r of serverRuns) runMap.set(String(r.id), r);
+      for (const r of cloudRuns) runMap.set(String(r.id), r);
+      const mergedRuns = Array.from(runMap.values());
+      mergedRuns.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setProductionRuns(mergedRuns);
+
+      // Merge server discards and cloud discards
+      const serverDiscards: DiscardReportRow[] = (discardsRes.status === 'fulfilled' && Array.isArray(discardsRes.value)) ? discardsRes.value : [];
+      const cloudDiscards: DiscardReportRow[] = (cloudDiscardsRes.status === 'fulfilled' && Array.isArray(cloudDiscardsRes.value)) ? cloudDiscardsRes.value : [];
+      const discMap = new Map<string, DiscardReportRow>();
+      for (const d of serverDiscards) discMap.set(String(d.id), d);
+      for (const d of cloudDiscards) discMap.set(String(d.id), d);
+      const mergedDiscards = Array.from(discMap.values());
+      mergedDiscards.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setDiscards(mergedDiscards);
+
+      if (kpiRes.status === 'fulfilled' && kpiRes.value) {
+        const kpiVal = kpiRes.value;
         setKpis({
-          efficiency: kpiRes.efficiency || 94.5,
-          merma: kpiRes.merma || 3.5,
-          produccion_hoy: kpiRes.produccion_hoy || 0,
-          processedByBatch: kpiRes.processedByBatch || {},
-          caliberDistribution: kpiRes.caliberDistribution || {}
+          efficiency: kpiVal.efficiency || 94.5,
+          merma: kpiVal.merma || 3.5,
+          produccion_hoy: kpiVal.produccion_hoy || 0,
+          processedByBatch: kpiVal.processedByBatch || {},
+          caliberDistribution: kpiVal.caliberDistribution || {}
         });
       }
 
       // Auto-select first available batch if not set
       if (!selectedBatchId && loadedBatches.length > 0) {
+        const kpiProcessed = (kpiRes.status === 'fulfilled' && kpiRes.value?.processedByBatch) || {};
         const active = loadedBatches.find(b => {
-          const processed = (kpiRes?.processedByBatch?.[b.id]) || 0;
+          const processed = kpiProcessed[b.id] || 0;
           return (b.weight_net - processed) > 0;
         });
         if (active) setSelectedBatchId(String(active.id));
@@ -371,6 +399,32 @@ export function Production() {
       const responseData = await res.json();
       const numCajas = esIndustria ? 0 : parseInt(boxesCount, 10);
 
+      // Persist production run in Firestore
+      try {
+        await saveCloudProductionRun({
+          id: responseData.id || Date.now(),
+          batch_id: selectedBatch.id,
+          batch_folio: selectedBatch.folio || `REC-${selectedBatch.id}`,
+          producer_name: selectedBatch.producer_name,
+          orchard: selectedBatch.orchard,
+          calibre: selectedCalibre,
+          color: selectedColor,
+          quality: destinoInfo?.calidad || 'primera',
+          presentation_id: esIndustria ? null : selectedPresentation.id,
+          presentation_name: esIndustria ? 'Granel / Molino' : selectedPresentation.name,
+          boxes_count: numCajas,
+          weight_total_kg: kilosSolicitados,
+          destination: esIndustria ? 'molino' : selectedDestination,
+          operator: operator,
+          cost_total: responseData.cost_total || 0,
+          cost_per_box: responseData.cost_per_box || 0,
+          date: responseData.date || new Date().toISOString(),
+          notes: `Clasificación ${selectedCalibre} (${selectedColor})`
+        });
+      } catch (cloudErr) {
+        console.warn('Production cloud sync notice:', cloudErr);
+      }
+
       // Prepare print label
       setPrintableLabel({
         batchFolio: selectedBatch.folio || `REC-${selectedBatch.id}`,
@@ -449,6 +503,22 @@ export function Production() {
       });
 
       if (!res.ok) throw new Error('Error guardando descarte');
+      const discData = await res.json();
+
+      try {
+        await saveCloudDiscard({
+          id: discData.id || Date.now(),
+          batch_id: discardForm.batch_id ? parseInt(discardForm.batch_id, 10) : (selectedBatch?.id || undefined),
+          type: discardForm.type,
+          kg: parseFloat(discardForm.kg),
+          impact_percent: parseFloat(discardForm.impact_percent) || 2.0,
+          trend: discardForm.trend as any,
+          notes: discardForm.notes,
+          date: new Date().toISOString()
+        });
+      } catch (cloudErr) {
+        console.warn('Discard cloud sync notice:', cloudErr);
+      }
 
       setShowDiscardModal(false);
       setDiscardForm({

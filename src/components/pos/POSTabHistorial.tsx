@@ -30,6 +30,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { POSThermalTicket } from './POSThermalTicket';
+import { getCloudPOSSales } from '../../lib/cloudService';
 
 interface POSTabHistorialProps {
   currentRole: POSUserRole;
@@ -63,10 +64,19 @@ export const POSTabHistorial: React.FC<POSTabHistorialProps> = ({
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('/api/pos/sales');
-      if (!res.ok) throw new Error('No se pudo cargar el historial de ventas.');
-      const data = await res.json();
-      setSales(Array.isArray(data) ? data : []);
+      const [res, cloudSales] = await Promise.allSettled([
+        fetch('/api/pos/sales').then(r => r.ok ? r.json() : []),
+        getCloudPOSSales()
+      ]);
+      const serverSales: POSSale[] = (res.status === 'fulfilled' && Array.isArray(res.value)) ? res.value : [];
+      const firestoreSales: POSSale[] = (cloudSales.status === 'fulfilled' && Array.isArray(cloudSales.value)) ? cloudSales.value : [];
+
+      const salesMap = new Map<string, POSSale>();
+      for (const s of serverSales) salesMap.set(s.folio || `ID-${s.id}`, s);
+      for (const s of firestoreSales) salesMap.set(s.folio || `ID-${s.id}`, s);
+      const merged = Array.from(salesMap.values());
+      merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSales(merged);
     } catch (err: any) {
       console.error('Error fetching sales:', err);
       setError(err.message || 'Error al conectar con el servidor.');
