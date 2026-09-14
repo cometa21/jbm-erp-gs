@@ -32,7 +32,9 @@ import {
   ShieldCheck,
   Activity,
   Layers,
-  Trash2
+  Trash2,
+  Share2,
+  Copy
 } from 'lucide-react';
 import type { Producer, Batch } from '../types';
 import { ConfirmationModal, type SummaryItem, type ConfirmationVariant } from './ConfirmationModal';
@@ -41,6 +43,10 @@ import { ThermalReceiptPreview, type WeighInReceiptData } from './ThermalReceipt
 import { Logo } from './Logo';
 import { calculateReceptionTotals } from '../utils/receptionCalculations';
 import { saveCloudBatch, getCloudBatches, deleteCloudBatch } from '../lib/cloudService';
+import { 
+  printWeightTicketDirectly, 
+  copyWeightTicketSummaryToClipboard 
+} from '../utils/thermalReceiptPrinter';
 import {
   getOfflineBatches,
   getOfflineBatchesAsync,
@@ -93,6 +99,32 @@ export function Reception() {
 
   // Selected Ticket for Modal View / Print
   const [selectedTicket, setSelectedTicket] = React.useState<Batch | null>(null);
+  const [printingTicketId, setPrintingTicketId] = React.useState<number | string | null>(null);
+  const [copiedTicketId, setCopiedTicketId] = React.useState<number | string | null>(null);
+
+  // Direct 80mm thermal print action leveraging the reusable utility
+  const handleDirectPrint = async (batch: Batch) => {
+    setPrintingTicketId(batch.id);
+    try {
+      await printWeightTicketDirectly(batch, { paperWidth: '80mm' });
+    } catch (err) {
+      console.error('Error al imprimir ticket térmico:', err);
+    } finally {
+      setTimeout(() => setPrintingTicketId(null), 1200);
+    }
+  };
+
+  // Quick summary copy for WhatsApp/SMS
+  const handleCopyTicket = async (batch: Batch) => {
+    setCopiedTicketId(batch.id);
+    try {
+      await copyWeightTicketSummaryToClipboard(batch);
+    } catch (err) {
+      console.error('Error al copiar resumen:', err);
+    } finally {
+      setTimeout(() => setCopiedTicketId(null), 2000);
+    }
+  };
 
   // Form State
   const [formData, setFormData] = React.useState({
@@ -548,8 +580,8 @@ export function Reception() {
       if (shouldPrintImmediate) {
         setSelectedTicket(localBatch);
         setTimeout(() => {
-          window.print();
-        }, 300);
+          printWeightTicketDirectly(localBatch, { paperWidth: '80mm' });
+        }, 150);
       } else {
         setSelectedTicket(localBatch);
       }
@@ -597,8 +629,8 @@ export function Reception() {
       if (shouldPrintImmediate) {
         setSelectedTicket(newBatch);
         setTimeout(() => {
-          window.print();
-        }, 300);
+          printWeightTicketDirectly(newBatch, { paperWidth: '80mm' });
+        }, 150);
       } else {
         setSelectedTicket(newBatch);
       }
@@ -617,8 +649,8 @@ export function Reception() {
       if (shouldPrintImmediate) {
         setSelectedTicket(localBatch);
         setTimeout(() => {
-          window.print();
-        }, 300);
+          printWeightTicketDirectly(localBatch, { paperWidth: '80mm' });
+        }, 150);
       } else {
         setSelectedTicket(localBatch);
       }
@@ -1172,24 +1204,46 @@ export function Reception() {
                       </div>
                     </td>
 
-                    {/* Actions / View Ticket Button, Sync & Delete */}
+                    {/* Actions: Direct Thermal Print, Preview, Copy & Manage */}
                     <td className="px-5 py-3.5 text-center">
                       <div className="inline-flex items-center gap-1.5 justify-center">
+                        {/* Direct Thermal Print (80mm) */}
+                        <button
+                          onClick={() => handleDirectPrint(batch)}
+                          disabled={printingTicketId === batch.id}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-75"
+                          title="Imprimir boleta directamente en ticketera térmica (80mm)"
+                        >
+                          <Printer size={13} className={printingTicketId === batch.id ? "animate-spin text-amber-300" : ""} />
+                          <span>{printingTicketId === batch.id ? 'Imprimiendo...' : 'Imprimir'}</span>
+                        </button>
+
+                        {/* View Preview in Modal */}
                         <button
                           onClick={() => setSelectedTicket(batch)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-lg text-xs font-bold transition-all shadow-xs group cursor-pointer"
-                          title="Ver e Imprimir Ticket Térmico JBM"
+                          className="inline-flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                          title="Ver vista previa detallada del ticket térmico"
                         >
-                          <Printer size={14} className="group-hover:scale-110 transition-transform" />
-                          <span>Ticket</span>
+                          <Eye size={13} />
+                          <span className="hidden xl:inline">Ver</span>
                         </button>
+
+                        {/* Quick Copy for WhatsApp / Messaging */}
+                        <button
+                          onClick={() => handleCopyTicket(batch)}
+                          className="p-1.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-500 rounded-lg text-xs transition-all shadow-xs cursor-pointer"
+                          title="Copiar resumen de boleta para WhatsApp"
+                        >
+                          {copiedTicketId === batch.id ? <Check size={13} className="text-emerald-600" /> : <Share2 size={13} />}
+                        </button>
+
                         {isOfflineItem && !effectiveIsOffline && (
                           <button
                             onClick={() => handleSyncBatches(true)}
                             className="p-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
                             title="Sincronizar esta boleta pendiente ahora"
                           >
-                            <CloudUpload size={14} />
+                            <CloudUpload size={13} />
                           </button>
                         )}
                         <button
@@ -1197,7 +1251,7 @@ export function Reception() {
                           className="p-1.5 bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-400 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer group"
                           title="Eliminar boleta de recepción"
                         >
-                          <Trash2 size={14} className="group-hover:scale-110 transition-transform" />
+                          <Trash2 size={13} className="group-hover:scale-110 transition-transform" />
                         </button>
                       </div>
                     </td>
@@ -1703,9 +1757,40 @@ export function Reception() {
                     <Sparkles size={14} className="text-amber-500" />
                     Vista Previa Exacta del Ticket
                   </span>
-                  <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold uppercase">
-                    Formato 80mm
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => printWeightTicketDirectly({
+                        folio: formData.scale_ticket_folio || 'BORRADOR',
+                        scale_ticket_folio: formData.scale_ticket_folio || 'BORRADOR',
+                        producer_name: selectedProducer ? selectedProducer.name : (formData.producer_id === '' ? 'SIN ASIGNAR' : 'Productor Local'),
+                        origin: formData.origin,
+                        orchard: formData.orchard,
+                        variety: 'Limón Mexicano',
+                        weight_gross: grossNum,
+                        weight_tare: tareNum,
+                        weight_net: netNum,
+                        price_per_kg: priceNum,
+                        subtotal: subtotalNum,
+                        scale_fee: scaleFeeNum,
+                        scale_fee_payment: formData.scale_fee_payment,
+                        extra_charge_per_kg: extraKgRate,
+                        extra_charge_total: extraChargeTotalNum,
+                        extra_charge_concept: formData.extra_charge_concept,
+                        total: totalNum,
+                        operator: formData.operator,
+                        notes: formData.notes
+                      })}
+                      className="text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-bold uppercase flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Imprimir prueba directa en ticketera térmica (80mm)"
+                    >
+                      <Printer size={11} />
+                      <span>Prueba 80mm</span>
+                    </button>
+                    <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold uppercase">
+                      80mm
+                    </span>
+                  </div>
                 </div>
 
                 <div className="w-full flex justify-center py-2">
@@ -1755,7 +1840,7 @@ export function Reception() {
                 }}
                 isOpen={true}
                 onClose={() => setSelectedTicket(null)}
-                onPrint={() => window.print()}
+                onPrint={() => printWeightTicketDirectly(selectedTicket, { paperWidth: '80mm' })}
                 showToolbar={true}
               />
             </div>
